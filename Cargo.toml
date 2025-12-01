@@ -2,5 +2,39 @@
 name = "to-do-or-die"
 version = "0.1.0"
 edition = "2024"
+description = "A todo CLI that enforces deadlines through escalating chaos"
+authors = ["Prajwal-k-tech"]
 
 [dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Time & IDs
+chrono = { version = "0.4", features = ["serde"] }
+humantime = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# System paths
+directories = "5"
+dirs = "5"
+
+# Notifications & Audio
+notify-rust = "4"
+rodio = "0.19"
+
+# File operations
+walkdir = "2"
+rand = "0.8"
+glob = "0.3"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3.23.0"
