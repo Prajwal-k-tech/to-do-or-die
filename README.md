@@ -67,6 +67,8 @@ to-do-or-die status
 | `status` | Show timer status |
 | `check [--dry-run]` | Manually check deadlines |
 | `config show\|set\|reset\|path` | Manage configuration |
+| `log [-n N] [--deletions] [--full]` | View audit log |
+| `candidates [--full]` | Preview deletion candidates |
 
 ## Duration Formats
 
@@ -143,15 +145,32 @@ to-do-or-die config reset
 
 ### Escalation Timeline
 
-| Stage | Time Overdue | Effects |
-|-------|--------------|---------|
-| 1 | 0-10 min | Notification |
-| 2 | 10-20 min | + Audio |
-| 3 | 20-30 min | + TTS |
-| 4 | 30-45 min | + Wallpaper |
-| 5 | 45-60 min | + Delete 1 file |
-| 6 | 1-1.5 hrs | + Delete 2 files |
-| 7+ | 1.5+ hrs | + Delete N files (capped) |
+Effects trigger based on **percentage of time elapsed**:
+
+| Stage | % Elapsed | Effects |
+|-------|-----------|---------|
+| 0 | 0-49% | No effects |
+| 1 | 50-74% | Notification |
+| 2 | 75-89% | + Audio |
+| 3 | 90-94% | + TTS |
+| 4 | 95-99% | + Wallpaper |
+| 5+ | 100%+ | + Deletions (escalating) |
+
+## Viewing Deletions
+
+```bash
+# See what files would be deleted
+to-do-or-die candidates
+
+# View audit log of past deletions
+to-do-or-die log
+
+# See full paths in log
+to-do-or-die log --full
+
+# Show only deletions
+to-do-or-die log --deletions
+```
 
 ## Data Storage
 

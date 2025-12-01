@@ -80,6 +80,33 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+
+    /// View audit log of all actions
+    #[command(alias = "audit")]
+    Log {
+        /// Show only the last N entries
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+
+        /// Show only deletions
+        #[arg(short, long)]
+        deletions: bool,
+
+        /// Show full paths (don't truncate)
+        #[arg(short, long)]
+        full: bool,
+    },
+
+    /// Show deletion candidates (what would be deleted)
+    Candidates {
+        /// Show full paths
+        #[arg(short, long)]
+        full: bool,
+
+        /// Limit number of candidates shown
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand, Debug)]

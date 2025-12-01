@@ -38,6 +38,8 @@ fn main() -> Result<()> {
         Commands::Status => cmd_status(),
         Commands::Check { dry_run } => cmd_check(dry_run),
         Commands::Config { action } => cmd_config(action),
+        Commands::Log { limit, deletions, full } => cmd_log(limit, deletions, full),
+        Commands::Candidates { full, limit } => cmd_candidates(full, limit),
     }
 }
 
@@ -225,6 +227,130 @@ fn cmd_config(action: ConfigAction) -> Result<()> {
             println!("Audit log:   {}", paths::audit_log_file().display());
         }
     }
+    Ok(())
+}
+
+/// View audit log
+fn cmd_log(limit: usize, deletions_only: bool, full_paths: bool) -> Result<()> {
+    let entries = deleter::read_audit_log()?;
+
+    if entries.is_empty() {
+        println!("No audit log entries yet.");
+        println!("The log will be populated when deadlines are enforced.");
+        return Ok(());
+    }
+
+    let filtered: Vec<_> = if deletions_only {
+        entries.iter().filter(|e| e.action == "delete").collect()
+    } else {
+        entries.iter().collect()
+    };
+
+    let display: Vec<_> = filtered.iter().rev().take(limit).collect();
+
+    println!("\n📋 Audit Log (showing last {} of {} entries)\n", display.len(), filtered.len());
+
+    // Get stats
+    let stats = deleter::audit_stats()?;
+    println!("📊 Stats: {} deletions, {} effects, {} failures\n",
+        stats.total_deletions, stats.total_effects, stats.failed_deletions);
+
+    println!("{:<20} {:<10} {:<8} {}", "Timestamp", "Action", "Status", "Details");
+    println!("{}", "-".repeat(80));
+
+    for entry in display.iter().rev() {
+        let time = entry.timestamp.format("%Y-%m-%d %H:%M:%S");
+        let status = if entry.success { "✓" } else { "✗" };
+        let dry = if entry.dry_run { " (dry)" } else { "" };
+
+        let details = if let Some(ref path) = entry.path {
+            if full_paths {
+                path.clone()
+            } else {
+                // Truncate long paths
+                if path.len() > 45 {
+                    format!("...{}", &path[path.len()-42..])
+                } else {
+                    path.clone()
+                }
+            }
+        } else if let Some(ref msg) = entry.message {
+            msg.clone()
+        } else {
+            "-".to_string()
+        };
+
+        println!("{:<20} {:<10} {:<8} {}{}",
+            time, entry.action, status, details, dry);
+    }
+
+    println!("\n💡 Use 'to-do-or-die log --full' to see complete paths");
+    println!("   Use 'to-do-or-die log --deletions' to see only deletions");
+
+    Ok(())
+}
+
+/// Show deletion candidates
+fn cmd_candidates(full_paths: bool, limit: usize) -> Result<()> {
+    let config = Config::load()?;
+    let candidates = safety::gather_candidates(&config)?;
+
+    if candidates.is_empty() {
+        println!("No deletion candidates found.");
+        println!("\nThis could mean:");
+        println!("  - Your cache is empty");
+        println!("  - Tier 1/2 deletion is disabled in config");
+        println!("  - All candidate files are blocklisted");
+        return Ok(());
+    }
+
+    println!("\n🎯 Deletion Candidates ({} files found)\n", candidates.len());
+    println!("These files may be deleted when todos go overdue:\n");
+
+    // Group by directory
+    let mut by_dir: std::collections::HashMap<String, Vec<&std::path::PathBuf>> = std::collections::HashMap::new();
+    for path in &candidates {
+        let dir = path.parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        by_dir.entry(dir).or_default().push(path);
+    }
+
+    let mut shown = 0;
+    for (dir, files) in by_dir.iter() {
+        if shown >= limit {
+            break;
+        }
+
+        let display_dir = if full_paths {
+            dir.clone()
+        } else if dir.len() > 50 {
+            format!("...{}", &dir[dir.len()-47..])
+        } else {
+            dir.clone()
+        };
+
+        println!("📁 {} ({} files)", display_dir, files.len());
+
+        for file in files.iter().take(5) {
+            if shown >= limit {
+                break;
+            }
+            let name = file.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "?".to_string());
+            println!("   - {}", name);
+            shown += 1;
+        }
+
+        if files.len() > 5 {
+            println!("   ... and {} more", files.len() - 5);
+        }
+    }
+
+    println!("\n💡 Use 'to-do-or-die candidates --full' for complete paths");
+    println!("   Deletions are random from this pool when todos go overdue.");
+
     Ok(())
 }
 
