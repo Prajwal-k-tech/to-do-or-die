@@ -106,6 +106,73 @@ pub enum Commands {
         /// Limit number of candidates shown
         #[arg(short = 'n', long, default_value = "50")]
         limit: usize,
+
+        /// Show by tier (1, 2, or all)
+        #[arg(short, long)]
+        tier: Option<u8>,
+    },
+
+    /// Manage deletion targets (directories to delete from)
+    #[command(alias = "target")]
+    Targets {
+        #[command(subcommand)]
+        action: TargetsAction,
+    },
+
+    /// Manage blocklist (paths that are never deleted)
+    #[command(alias = "block")]
+    Blocklist {
+        #[command(subcommand)]
+        action: BlocklistAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TargetsAction {
+    /// List all target directories (Tier 1 + Tier 2)
+    #[command(alias = "ls")]
+    List,
+
+    /// Add a directory to Tier 2 targets
+    Add {
+        /// Path to add (e.g., ~/Downloads/temp, ~/Documents/scratch)
+        path: String,
+    },
+
+    /// Remove a directory from Tier 2 targets
+    #[command(alias = "rm")]
+    Remove {
+        /// Path to remove
+        path: String,
+    },
+
+    /// Show suggested directories to add
+    Suggest,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BlocklistAction {
+    /// List all blocklisted paths
+    #[command(alias = "ls")]
+    List,
+
+    /// Add a path to the blocklist
+    Add {
+        /// Path to protect from deletion
+        path: String,
+    },
+
+    /// Remove a path from the blocklist
+    #[command(alias = "rm")]
+    Remove {
+        /// Path to unprotect
+        path: String,
+    },
+
+    /// Check if a path would be protected from deletion
+    Check {
+        /// Path to check
+        path: String,
     },
 }
 

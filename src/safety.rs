@@ -293,6 +293,91 @@ pub fn select_random_seeded(candidates: &[PathBuf], count: usize, seed: u64) -> 
     shuffled.into_iter().take(count).collect()
 }
 
+/// Gather candidates separated by tier
+pub fn gather_candidates_by_tier(config: &Config) -> anyhow::Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let blocklist = build_blocklist(config)?;
+    
+    let tier1 = if config.deletion.tier1_enabled {
+        gather_tier1_candidates(&blocklist, config)?
+    } else {
+        Vec::new()
+    };
+    
+    let tier2 = if config.deletion.tier2_enabled {
+        gather_tier2_candidates(&blocklist, config)?
+    } else {
+        Vec::new()
+    };
+    
+    Ok((tier1, tier2))
+}
+
+/// Check if a path is protected (for validation when adding targets)
+pub fn is_path_protected(path: &Path) -> bool {
+    use crate::config::Config;
+    
+    let path_str = path.to_string_lossy().to_lowercase();
+    
+    // Check built-in protected directories
+    let protected_dirs = [
+        ".ssh",
+        ".gnupg", 
+        ".password-store",
+        ".config/to-do-or-die",
+        ".local/share/to-do-or-die",
+        ".local/state/to-do-or-die",
+        ".config/systemd",
+    ];
+    
+    for protected in protected_dirs {
+        if path_str.contains(protected) {
+            return true;
+        }
+    }
+    
+    // Check if it's a dotfile in home (except .cache)
+    if let Some(home) = dirs::home_dir() {
+        if path.parent() == Some(&home) {
+            if let Some(name) = path.file_name() {
+                let name = name.to_string_lossy();
+                if name.starts_with('.') && name != ".cache" {
+                    return true;
+                }
+            }
+        }
+    }
+    
+    // Check protected extensions
+    if let Some(ext) = path.extension() {
+        if PROTECTED_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str()) {
+            return true;
+        }
+    }
+    
+    // Check .git directories
+    if path.components().any(|c| c.as_os_str() == ".git") {
+        return true;
+    }
+    
+    // Check user blocklist (load config)
+    if let Ok(config) = Config::load() {
+        for blocked in &config.blocklist.additional_paths {
+            let blocked_path = crate::paths::expand_tilde(blocked);
+            if let Ok(canonical) = blocked_path.canonicalize() {
+                if path.starts_with(&canonical) {
+                    return true;
+                }
+            }
+            // Also check without canonicalization
+            if path.starts_with(&blocked_path) {
+                return true;
+            }
+        }
+    }
+    
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
