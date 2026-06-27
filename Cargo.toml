@@ -1,9 +1,17 @@
 [package]
 name = "to-do-or-die"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "A todo CLI that enforces deadlines through escalating chaos"
+description = "A todo CLI that enforces deadlines through escalating consequences"
 authors = ["Prajwal-k-tech"]
+license = "MIT"
+repository = "https://github.com/Prajwal-k-tech/to-do-or-die"
+keywords = ["todo", "cli", "productivity", "systemd", "deadline"]
+categories = ["command-line-utilities"]
+
+[features]
+default = []
+audio = ["dep:rodio"]
 
 [dependencies]
 # CLI
@@ -14,7 +22,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 
-# Time & IDs
+# Time and IDs
 chrono = { version = "0.4", features = ["serde"] }
 humantime = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -23,18 +31,25 @@ uuid = { version = "1", features = ["v4", "serde"] }
 directories = "5"
 dirs = "5"
 
-# Notifications & Audio
+# Notifications (always available, uses D-Bus)
 notify-rust = "4"
-rodio = "0.19"
+
+# Audio playback (optional, requires ALSA dev headers)
+rodio = { version = "0.19", optional = true }
 
 # File operations
 walkdir = "2"
 rand = "0.8"
 glob = "0.3"
+trash = "5"
+fs2 = "0.4"
+
+# Terminal colors
+owo-colors = "4"
 
 # Error handling
 thiserror = "2"
 anyhow = "1"
 
 [dev-dependencies]
-tempfile = "3.23.0"
+tempfile = "3.23"

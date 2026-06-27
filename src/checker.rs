@@ -8,12 +8,20 @@
 //! - Stage 3 (90%): Notification + TTS
 //! - Stage 4 (95%): Wallpaper change
 //! - Stage 5+ (100%+): File deletions begin
+//!
+//! Important: non-destructive effects (notification, audio, TTS, wallpaper) only
+//! fire on stage TRANSITIONS (when the stage increases). This prevents spamming
+//! the user with notifications every 5 minutes. However, DELETIONS fire on EVERY
+//! check when the todo is overdue (stage >= 5), not just on transitions. This is
+//! the core enforcement mechanism: the longer you wait, the more files get deleted.
 
 use crate::config::Config;
 use crate::deleter;
 use crate::effects;
 use crate::safety;
 use crate::todos::{TodoItem, TodoList};
+use fs2::FileExt;
+use std::fs::OpenOptions;
 
 /// Result of checking a single todo
 #[derive(Debug)]
@@ -25,10 +33,42 @@ pub struct CheckResult {
     pub previous_stage: u32,
     pub effects_triggered: Vec<String>,
     pub files_deleted: u32,
+    pub deleted_paths: Vec<String>,
 }
 
-/// Check all active todos and trigger appropriate effects
+/// Check all active todos and trigger appropriate effects.
+///
+/// Uses a file lock to prevent concurrent checker runs from interfering.
+/// Returns the list of check results.
 pub fn run_check(dry_run: bool) -> anyhow::Result<Vec<CheckResult>> {
+    // Acquire exclusive lock to prevent concurrent runs
+    let lock_path = crate::paths::lock_file();
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+
+    // Try to acquire lock non-blocking; if it fails, another check is running
+    if lock_file.try_lock_exclusive().is_err() {
+        println!("Another check is already running. Skipping this invocation.");
+        return Ok(Vec::new());
+    }
+
+    let result = run_check_inner(dry_run);
+
+    // Release lock
+    let _ = lock_file.unlock();
+
+    result
+}
+
+/// Inner check logic (called after lock is acquired)
+fn run_check_inner(dry_run: bool) -> anyhow::Result<Vec<CheckResult>> {
     let config = Config::load()?;
     let mut todos = TodoList::load()?;
     let mut results = Vec::new();
@@ -43,7 +83,9 @@ pub fn run_check(dry_run: bool) -> anyhow::Result<Vec<CheckResult>> {
 
     if attention_ids.is_empty() {
         if dry_run {
-            println!("No todos need attention yet. All clear! 🎉");
+            println!("No todos need attention yet. All clear!");
+        } else {
+            println!("No todos need attention. All clear!");
         }
         return Ok(results);
     }
@@ -56,21 +98,27 @@ pub fn run_check(dry_run: bool) -> anyhow::Result<Vec<CheckResult>> {
 
         let mut effects_triggered = Vec::new();
         let mut files_deleted = 0u32;
+        let mut deleted_paths = Vec::new();
 
-        // Only trigger effects if stage has increased
+        // Non-destructive effects only fire on stage TRANSITIONS.
+        // This prevents spamming notifications every 5 minutes.
         if current_stage > previous_stage {
-            // Trigger effects for this stage
-            let triggered = trigger_effects_for_stage(todo, current_stage, percent, &config, dry_run)?;
+            let triggered =
+                trigger_effects_for_stage(todo, current_stage, percent, &config, dry_run)?;
             effects_triggered = triggered;
+        }
 
-            // Handle deletion if we're at stage 5+ (100%+ elapsed = overdue)
-            if current_stage >= 5 && config.deletion.enabled {
-                let deletion_count =
-                    calculate_deletion_count(current_stage, config.general.escalation_cap);
+        // DELETIONS fire on EVERY check when overdue (stage >= 5).
+        // This is the core enforcement: every check while overdue deletes files.
+        // The count escalates with the stage (how overdue the todo is).
+        if current_stage >= 5 && config.deletion.enabled {
+            let deletion_count =
+                calculate_deletion_count(current_stage, config.general.escalation_cap);
 
-                if deletion_count > 0 {
-                    files_deleted = execute_deletions(todo, deletion_count, &config, dry_run)?;
-                }
+            if deletion_count > 0 {
+                let (count, paths) = execute_deletions(todo, deletion_count, &config, dry_run)?;
+                files_deleted = count;
+                deleted_paths = paths;
             }
         }
 
@@ -82,6 +130,7 @@ pub fn run_check(dry_run: bool) -> anyhow::Result<Vec<CheckResult>> {
             previous_stage,
             effects_triggered,
             files_deleted,
+            deleted_paths,
         });
 
         // Update the todo's stage and deletion count
@@ -92,7 +141,7 @@ pub fn run_check(dry_run: bool) -> anyhow::Result<Vec<CheckResult>> {
         }
     }
 
-    // Save updated todos
+    // Save updated todos atomically
     if !dry_run {
         todos.save()?;
     }
@@ -103,7 +152,7 @@ pub fn run_check(dry_run: bool) -> anyhow::Result<Vec<CheckResult>> {
     Ok(results)
 }
 
-/// Calculate how many files to delete at this stage
+/// Calculate how many files to delete at this stage.
 /// Stage 5 = 1 file, Stage 6 = 2 files, etc. (capped at escalation_cap)
 fn calculate_deletion_count(stage: u32, cap: u32) -> u32 {
     if stage < 5 {
@@ -116,19 +165,20 @@ fn calculate_deletion_count(stage: u32, cap: u32) -> u32 {
 /// Get the notification title based on stage
 fn get_notification_title(stage: u32, percent: f64) -> String {
     if stage >= 5 {
-        "🔥 TODO OVERDUE - DELETIONS ACTIVE!".to_string()
+        "TODO OVERDUE - DELETIONS ACTIVE".to_string()
     } else if stage == 4 {
-        "⚠️ CRITICAL: 95% time elapsed!".to_string()
+        "CRITICAL: 95% time elapsed".to_string()
     } else if stage == 3 {
-        "⏰ WARNING: 90% time elapsed!".to_string()
+        "WARNING: 90% time elapsed".to_string()
     } else if stage == 2 {
-        "📢 ALERT: 75% time elapsed!".to_string()
+        "ALERT: 75% time elapsed".to_string()
     } else {
-        format!("📋 Reminder: {:.0}% time elapsed", percent)
+        format!("Reminder: {:.0}% time elapsed", percent)
     }
 }
 
-/// Trigger effects for the given stage
+/// Trigger non-destructive effects for the given stage.
+/// Only called on stage transitions to avoid spam.
 fn trigger_effects_for_stage(
     todo: &TodoItem,
     stage: u32,
@@ -147,7 +197,7 @@ fn trigger_effects_for_stage(
             todo.time_status(),
             percent
         );
-        
+
         if dry_run {
             triggered.push("notification".to_string());
         } else {
@@ -168,7 +218,11 @@ fn trigger_effects_for_stage(
 
     // Stage 3+ (90%+): TTS
     if stage >= 3 && config.notifications.tts_enabled {
-        let urgency = if stage >= 5 { "overdue" } else { "running out of time" };
+        let urgency = if stage >= 5 {
+            "overdue"
+        } else {
+            "running out of time"
+        };
         let message = format!(
             "Warning! Your todo is {}. {}. Complete it now!",
             urgency, todo.description
@@ -194,38 +248,42 @@ fn trigger_effects_for_stage(
     Ok(triggered)
 }
 
-/// Execute file deletions for this todo
+/// Execute file deletions for this todo.
+/// Returns (count_deleted, list_of_paths).
 fn execute_deletions(
     todo: &TodoItem,
     count: u32,
     config: &Config,
     dry_run: bool,
-) -> anyhow::Result<u32> {
-    // Gather deletion candidates
+) -> anyhow::Result<(u32, Vec<String>)> {
     let candidates = safety::gather_candidates(config)?;
 
     if candidates.is_empty() {
         if dry_run {
             println!("  No deletion candidates found");
         }
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
 
-    // Select random files to delete
     let selected = safety::select_random(&candidates, count as usize);
 
     if dry_run {
         println!("  Would delete {} files:", selected.len());
+        let paths: Vec<String> = selected.iter().map(|p| p.display().to_string()).collect();
         for path in &selected {
             println!("    - {}", path.display());
         }
-        return Ok(selected.len() as u32);
+        return Ok((selected.len() as u32, paths));
     }
 
-    // Actually delete the files
-    let deleted = deleter::delete_files(&selected, &todo.id.to_string())?;
+    let deleted = deleter::delete_files(
+        &selected,
+        &todo.id.to_string(),
+        config.deletion.permanent_delete,
+    )?;
+    let paths: Vec<String> = selected.iter().map(|p| p.display().to_string()).collect();
 
-    Ok(deleted as u32)
+    Ok((deleted as u32, paths))
 }
 
 /// Print a summary of the check results
@@ -236,29 +294,71 @@ fn print_check_summary(results: &[CheckResult], dry_run: bool) {
 
     let prefix = if dry_run { "[DRY RUN] " } else { "" };
 
-    println!("\n{}=== Check Summary ===", prefix);
+    // Show aggregate stats first (most important info)
+    let total_deleted: u32 = results.iter().map(|r| r.files_deleted).sum();
+    let overdue_count = results.iter().filter(|r| r.stage >= 5).count();
+
+    if total_deleted > 0 {
+        println!(
+            "\n{}=== Check Summary: {} files {} across {} overdue todos ===",
+            prefix,
+            total_deleted,
+            if dry_run {
+                "would be deleted"
+            } else {
+                "deleted"
+            },
+            overdue_count
+        );
+    } else {
+        println!("\n{}=== Check Summary ===", prefix);
+    }
 
     for result in results {
-        let status = if result.stage >= 5 { "🔥 OVERDUE" } else { "⏳ Warning" };
+        let status = if result.stage >= 5 {
+            "OVERDUE"
+        } else {
+            "Warning"
+        };
         println!(
-            "\n{} {} ({}) - {:.0}% elapsed",
+            "\n  {} {} ({}) - {:.0}% elapsed",
             status, result.description, result.todo_id, result.percent_elapsed
         );
-        println!("   Stage: {} → {}", result.previous_stage, result.stage);
+        println!("   Stage: {} -> {}", result.previous_stage, result.stage);
 
         if !result.effects_triggered.is_empty() {
             println!("   Effects: {}", result.effects_triggered.join(", "));
         }
 
         if result.files_deleted > 0 {
-            println!("   🗑️ Files deleted: {}", result.files_deleted);
+            let action = if dry_run { "Would delete" } else { "Deleted" };
+            println!("   {} {} files:", action, result.files_deleted);
+            for path in &result.deleted_paths {
+                println!("     - {}", path);
+            }
         }
     }
+}
 
-    let total_deleted: u32 = results.iter().map(|r| r.files_deleted).sum();
-    if total_deleted > 0 {
-        println!("\n🔥 Total files deleted this check: {}", total_deleted);
+/// Check if any todos would trigger deletions in this check.
+/// Used by the confirmation prompt before running a live check.
+pub fn would_delete_files() -> anyhow::Result<bool> {
+    let config = Config::load()?;
+    if !config.deletion.enabled {
+        return Ok(false);
     }
+
+    let todos = TodoList::load()?;
+    for todo in todos.active() {
+        let stage = todo.calculate_stage();
+        if stage >= 5 {
+            let count = calculate_deletion_count(stage, config.general.escalation_cap);
+            if count > 0 {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

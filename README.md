@@ -1,121 +1,213 @@
-# to-do-or-die 💀
+# to-do-or-die
 
-A todo CLI with teeth. Miss a deadline, and consequences escalate from gentle notifications to **file deletion**.
+A command-line todo application that enforces deadlines through escalating consequences. Miss a deadline, and the system progresses from desktop notifications to audio alerts, text-to-speech warnings, wallpaper changes, and ultimately file deletion.
 
-## The Concept
+Built in Rust as a systems programming project demonstrating CLI design, systemd integration, file system safety, and progressive escalation patterns.
 
-Set a todo → Complete it on time → Or face escalating chaos:
+## How It Works
 
-Effects trigger based on **percentage of time elapsed**:
+Set a todo with a deadline. A systemd user timer checks every 5 minutes. As the deadline approaches, effects escalate based on the percentage of time elapsed:
 
-| % Elapsed | Effect |
-|-----------|--------|
-| 50% | 📢 Desktop notification |
-| 75% | 🔊 Audio alert |
-| 90% | 🗣️ Text-to-speech warning |
-| 95% | 🖼️ Wallpaper change |
-| 100%+ | 🗑️ File deletion (escalating!) |
+| Stage | Time Elapsed | Effect |
+|-------|-------------|--------|
+| 0 | 0 to 49% | No effects (working time) |
+| 1 | 50% | Desktop notification |
+| 2 | 75% | Notification + audio alert |
+| 3 | 90% | Notification + text-to-speech |
+| 4 | 95% | Notification + wallpaper change |
+| 5+ | 100%+ (overdue) | File deletion (escalating count) |
 
-**Example**: Set a 2-hour deadline:
-- At 1 hour: notification
-- At 1.5 hours: audio alert
-- At 1h 48m: TTS warning
-- At 1h 54m: wallpaper turns red
-- At 2 hours: files start getting deleted!
+When a todo goes overdue, files are deleted on every check cycle. The deletion count escalates: stage 5 deletes 1 file per check, stage 6 deletes 2, and so on, up to a configurable cap.
+
+**Example**: A 2-hour deadline triggers:
+- At 1 hour (50%): notification
+- At 1.5 hours (75%): notification + audio
+- At 1h 48m (90%): notification + TTS
+- At 1h 54m (95%): wallpaper change
+- At 2 hours (100%): file deletion begins, 1 file per check
+- At 2h 12m (110%): 2 files per check
+- At 2h 24m (120%): 3 files per check
+
+## Safety First
+
+This tool deletes files, so safety is the top priority:
+
+- **Safe defaults**: New users start in dry-run mode with deletion disabled. You must explicitly enable real enforcement.
+- **Trash by default**: Files are moved to the system trash (recoverable), not permanently deleted. Permanent deletion requires explicit opt-in.
+- **Tiered deletion**: Only safe, recoverable files are targeted by default (caches, cookies, trash bin, old downloads).
+- **Blocklist protection**: SSH keys, GPG keys, passwords, git repositories, shell configs, and cryptographic files are never deleted.
+- **Path validation**: Root, home directory, and system directories cannot be added as deletion targets.
+- **Symlink protection**: Tier 2 paths are canonicalized before walking. Symlinks are never followed during directory traversal.
+- **Confirmation prompts**: Manual `check` commands prompt before deleting files. Use `--yes` to skip.
+- **Audit log**: Every deletion is logged with timestamp, file path, and todo ID in JSONL format.
+- **Atomic writes**: Config and todo files are written atomically (write to temp, then rename) to prevent corruption from crashes.
+- **File locking**: A lock file prevents concurrent checker processes from interfering.
 
 ## Installation
 
+### Prerequisites
+
+- Rust toolchain (stable, edition 2024)
+- Linux with systemd (for background monitoring)
+- Optional system packages for full effect chain:
+  - `espeak-ng` for text-to-speech
+  - `pulseaudio-utils` (paplay) or `alsa-utils` (aplay) for audio alerts
+  - `gsettings` (GNOME) or `plasma-apply-colorscheme` (KDE) for wallpaper changes
+
+### Build and Install
+
 ```bash
-# Clone and build
 git clone https://github.com/Prajwal-k-tech/to-do-or-die.git
 cd to-do-or-die
 cargo build --release
-
-# Install to PATH
 cargo install --path .
 ```
+
+### With Native Audio Support
+
+By default, audio playback uses system commands (paplay/aplay). For native Rust audio playback via rodio, build with the `audio` feature (requires `libasound2-dev` on Debian/Ubuntu):
+
+```bash
+sudo apt install libasound2-dev  # Debian/Ubuntu
+cargo build --release --features audio
+```
+
+### Verify Your Setup
+
+```bash
+to-do-or-die doctor
+```
+
+This checks all system dependencies and reports what is available.
 
 ## Quick Start
 
 ```bash
-# Add a todo with deadline
+# Add a todo with a deadline
 to-do-or-die add "Finish report" --due "2 hours"
 to-do-or-die add "Call mom" --due "30 minutes"
 
-# List your todos
+# List your todos (sorted by urgency)
 to-do-or-die list
 
-# Complete a todo (use ID or partial match)
-to-do-or-die complete a1b2
+# Complete a todo (by index, UUID prefix, or description)
+to-do-or-die complete 1
+to-do-or-die complete a1b2c3d4
+to-do-or-die complete "finish report"
+
+# Check system dependencies
+to-do-or-die doctor
 
 # Install background monitoring (systemd timer)
 to-do-or-die install
 
-# Check status
+# Check timer status
 to-do-or-die status
+```
+
+## Enabling Real Enforcement
+
+By default, the tool runs in safe mode (dry-run, deletion disabled). To enable real enforcement:
+
+```bash
+# Disable dry-run mode
+to-do-or-die config set dry_run false
+
+# Enable file deletion
+to-do-or-die config set deletion true
+
+# Verify your settings
+to-do-or-die config show
+
+# Preview what would be deleted
+to-do-or-die check --dry-run
+
+# Run a live check (will prompt for confirmation)
+to-do-or-die check
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `add <desc> --due <time>` | Add a todo with deadline |
-| `list [--all]` | List active (or all) todos |
-| `complete <id>` | Mark todo as done |
-| `install [--no-linger]` | Set up systemd timer |
+| `add <desc> --due <time>` | Add a todo with a deadline |
+| `list [--all] [--json]` | List todos sorted by urgency |
+| `complete <id>` | Mark todo as done (index, UUID, or description) |
+| `install [--linger]` | Set up systemd timer for background monitoring |
 | `uninstall` | Remove systemd timer |
 | `status` | Show timer status |
-| `check [--dry-run]` | Manually check deadlines |
-| `config show\|set\|reset\|path` | Manage configuration |
+| `check [--dry-run] [--no-dry-run] [--yes]` | Run deadline check manually |
+| `config show / set / reset / path` | Manage configuration |
 | `log [-n N] [--deletions] [--full]` | View audit log |
-| `candidates [--full]` | Preview deletion candidates |
+| `candidates [--full] [-n N] [--tier N]` | Preview deletion candidates |
+| `targets list / add / remove / suggest` | Manage deletion target directories |
+| `blocklist list / add / remove / check` | Manage protected paths |
+| `doctor` | Check system dependencies and configuration |
+
+### Aliases
+
+Short aliases are available: `a` (add), `ls` (list), `c`/`done` (complete), `audit` (log), `target` (targets), `block` (blocklist).
 
 ## Duration Formats
 
-All these work:
+All of these work:
 - `2 hours`, `2h`
 - `30 minutes`, `30m`, `30min`
 - `1 day`, `1d`
-- `1 hour 30 minutes`
+- `1 hour 30 minutes`, `1h30m`
 
-## What Gets Deleted?
+## What Gets Deleted
 
-By default, only **safe, recoverable** files:
+### Tier 1: Cache and Cookies (Built-in)
 
-### Tier 1 (Default)
+Always safe to delete, recoverable through normal use:
 - `~/.cache/*` - Application caches
 - `~/.local/share/Trash/*` - Already-deleted files
-- `~/Downloads/*.tmp` - Incomplete downloads
-- Browser cookies (forces re-login - annoying but safe)
+- `~/Downloads/*.tmp`, `*.part`, `*.crdownload` - Incomplete downloads
+- `~/Downloads/*` (older than 30 days) - Old downloads
+- Browser cookies (Chrome, Chromium, Firefox, Brave, Edge, Opera, Vivaldi)
 
-### Tier 2 (Configurable)
-Add your own safe directories in config:
-```toml
-[deletion]
-tier2_paths = ["~/Downloads/temp", "~/Documents/scratch"]
+### Tier 2: User-Configured Directories
+
+Add your own safe directories:
+
+```bash
+to-do-or-die targets add ~/Downloads/temp
+to-do-or-die targets add ~/Documents/scratch
+to-do-or-die targets list
 ```
 
 ### Never Deleted (Blocklist)
-- SSH keys (`~/.ssh/`)
-- GPG keys (`~/.gnupg/`)
-- Password stores
-- Git directories
-- Our own config files
+
+These are always protected:
+- `~/.ssh/` - SSH keys
+- `~/.gnupg/` - GPG keys
+- `~/.password-store/` - Password store
+- `~/.config/to-do-or-die/` - Application config
+- `~/.local/share/to-do-or-die/` - Application data
+- `~/.local/state/to-do-or-die/` - Audit logs
+- `~/.config/systemd/` - systemd units
+- `**/.git/` - Git repository internals (path component check)
+- Shell configs: `.bashrc`, `.zshrc`, `.profile`, `.bash_profile`, fish, nushell, elvish configs
+- File extensions: `.key`, `.pem`, `.crt`, `.cer`, `.p12`, `.pfx`, `.gpg`, `.asc`
+
+Add custom protected paths:
+
+```bash
+to-do-or-die blocklist add ~/important-project/
+to-do-or-die blocklist check ~/some/path
+```
 
 ## Configuration
 
 Config file: `~/.config/to-do-or-die/config.toml`
 
 ```bash
-# View current config
-to-do-or-die config show
-
-# Change settings
+to-do-or-die config show          # View with explanations
+to-do-or-die config set dry_run false
+to-do-or-die config set deletion true
 to-do-or-die config set escalation_cap 15
-to-do-or-die config set cookies false
-to-do-or-die config set tts false
-
-# Reset to defaults
+to-do-or-die config set permanent_delete true   # Hardcore mode
 to-do-or-die config reset
 ```
 
@@ -123,100 +215,81 @@ to-do-or-die config reset
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `check_interval_minutes` | 5 | Timer check interval |
-| `escalation_cap` | 10 | Max deletions per check |
-| `dry_run` | false | Preview mode (no actual deletions) |
-| `notifications` | true | Enable desktop notifications |
-| `sound` | true | Enable audio alerts |
-| `tts` | true | Enable text-to-speech |
-| `wallpaper` | true | Enable wallpaper changes |
-| `deletion` | true | Enable file deletion |
-| `tier1` | true | Enable cache/cookie deletion |
-| `tier2` | true | Enable custom path deletion |
-| `cookies` | true | Enable browser cookie deletion |
-
-## How It Works
-
-1. **You add todos** with deadlines via CLI
-2. **systemd timer** runs every 5 minutes (after `install`)
-3. **Checker** evaluates overdue todos
-4. **Effects escalate** based on time overdue
-5. **Audit log** records all actions
-
-### Escalation Timeline
-
-Effects trigger based on **percentage of time elapsed**:
-
-| Stage | % Elapsed | Effects |
-|-------|-----------|---------|
-| 0 | 0-49% | No effects |
-| 1 | 50-74% | Notification |
-| 2 | 75-89% | + Audio |
-| 3 | 90-94% | + TTS |
-| 4 | 95-99% | + Wallpaper |
-| 5+ | 100%+ | + Deletions (escalating) |
-
-## Viewing Deletions
-
-```bash
-# See what files would be deleted
-to-do-or-die candidates
-
-# View audit log of past deletions
-to-do-or-die log
-
-# See full paths in log
-to-do-or-die log --full
-
-# Show only deletions
-to-do-or-die log --deletions
-```
+| `check_interval_minutes` | 5 | Timer check interval (minutes) |
+| `escalation_cap` | 10 | Max files deleted per check |
+| `dry_run` | true | Preview mode (no actual changes) |
+| `color` | true | Colored terminal output |
+| `notifications` | true | Desktop notifications |
+| `sound` | true | Audio alerts |
+| `tts` | true | Text-to-speech warnings |
+| `wallpaper` | true | Wallpaper changes |
+| `deletion` | false | Master switch for file deletion |
+| `tier1` | true | Cache/cookie/trash deletion |
+| `tier2` | true | User-configured directory deletion |
+| `cookies` | true | Browser cookie deletion |
+| `permanent_delete` | false | Permanent delete vs. move to trash |
+| `download_age_days` | 30 | Age threshold for old downloads |
+| `alert_sound` | "default" | Audio file path or "default" |
 
 ## Data Storage
 
-Following XDG Base Directory spec:
+Following XDG Base Directory specification:
 
 | File | Location |
 |------|----------|
 | Config | `~/.config/to-do-or-die/config.toml` |
 | Todos | `~/.local/share/to-do-or-die/todos.json` |
 | Audit log | `~/.local/state/to-do-or-die/audit.jsonl` |
+| Lock file | `~/.local/state/to-do-or-die/check.lock` |
 
-## Dependencies
+## Architecture
 
-- **notify-rust** - Desktop notifications
-- **rodio** - Audio playback
-- **espeak-ng** - Text-to-speech (system package)
-- **systemd** - Background scheduling
+```
+User CLI  -->  systemd User Timer  -->  Deadline Checker  -->  Effects Chain
+                   (5 min)                (stage calc)          (notify, audio,
+                                                                TTS, wallpaper,
+                                                                file deletion)
+```
+
+### Module Structure
+
+| Module | Responsibility |
+|--------|---------------|
+| `main.rs` | CLI dispatch, command handlers, output formatting |
+| `cli.rs` | clap command definitions, help text, aliases |
+| `config.rs` | TOML configuration, defaults, atomic save |
+| `todos.rs` | Todo items, JSON persistence, stage calculation |
+| `checker.rs` | Deadline checking, effect triggering, file locking |
+| `effects.rs` | Notifications, audio, TTS, wallpaper |
+| `safety.rs` | Candidate gathering, blocklist, path validation |
+| `deleter.rs` | File deletion (trash or permanent), audit logging |
+| `installer.rs` | systemd timer/service unit generation |
+| `paths.rs` | XDG paths, atomic write helper |
 
 ## Development
 
 ```bash
-# Run tests
-cargo test
-
-# Build debug
-cargo build
-
-# Run directly
-cargo run -- add "Test" --due "1 hour"
-
-# Check for issues
-cargo clippy
+cargo build              # Build
+cargo test               # Run 43+ unit tests
+cargo clippy --all-targets  # Lint (zero warnings)
+cargo fmt                # Format code
+cargo build --features audio  # Build with native audio
 ```
 
-## Safety First
+## Tech Stack
 
-- 🔒 **Blocklist** protects critical files
-- 👁️ **Audit log** records every deletion
-- 🧪 **Dry-run mode** for testing
-- ⚙️ **Configurable** - disable any effect
-- 📁 **Tier system** - only safe files by default
+- **Language**: Rust (edition 2024)
+- **CLI**: clap v4 with derive macros
+- **Serialization**: serde + serde_json (todos), toml (config)
+- **Time**: chrono
+- **Notifications**: notify-rust (D-Bus)
+- **Audio**: rodio (optional, feature-gated) or system commands
+- **File deletion**: trash crate (FreeDesktop.org trash spec)
+- **File locking**: fs2
+- **Terminal colors**: owo-colors with NO_COLOR support
+- **Error handling**: thiserror + anyhow
+- **Scheduling**: systemd user timers
 
 ## License
 
 MIT
-
----
-
-*"The best productivity tool is the one that makes procrastination painful."*

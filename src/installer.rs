@@ -1,6 +1,7 @@
 //! systemd service and timer installation
 //!
-//! Installs user-level systemd units for background todo monitoring
+//! Installs user-level systemd units for background todo monitoring.
+//! The timer runs `to-do-or-die check` at a configurable interval.
 
 use std::fs;
 use std::process::Command;
@@ -9,6 +10,7 @@ use thiserror::Error;
 use crate::paths;
 
 #[derive(Error, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum InstallerError {
     #[error("Failed to write systemd unit: {0}")]
     WriteError(#[from] std::io::Error),
@@ -35,24 +37,45 @@ WantedBy=timers.target
     )
 }
 
-/// systemd service unit content
+/// systemd service unit content.
+/// Detects DISPLAY and WAYLAND_DISPLAY from the current environment at install time
+/// instead of hardcoding DISPLAY=:0 (which fails on Wayland and multi-display setups).
 fn service_unit() -> String {
-    // Get the path to our binary
     let binary_path = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "to-do-or-die".to_string());
 
-    format!(
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
+    let xdg_session_type = std::env::var("XDG_SESSION_TYPE").ok();
+    let xdg_runtime_dir = std::env::var("XDG_RUNTIME_DIR").ok();
+
+    let mut unit = format!(
         r#"[Unit]
 Description=Todo deadline checker
 
 [Service]
 Type=oneshot
 ExecStart={binary_path} check
-Environment=DISPLAY=:0
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Environment=DISPLAY={display}
 "#
-    )
+    );
+
+    if let Some(wl) = wayland_display {
+        unit.push_str(&format!("Environment=WAYLAND_DISPLAY={wl}\n"));
+    }
+    if let Some(st) = xdg_session_type {
+        unit.push_str(&format!("Environment=XDG_SESSION_TYPE={st}\n"));
+    }
+    if let Some(rd) = xdg_runtime_dir {
+        unit.push_str(&format!(
+            "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path={rd}/bus\n"
+        ));
+    } else {
+        unit.push_str("Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus\n");
+    }
+
+    unit
 }
 
 /// Install systemd user timer and service
@@ -63,63 +86,60 @@ pub fn install(interval_minutes: u32, enable_linger: bool) -> Result<(), Install
     // Write timer unit
     let timer_path = systemd_dir.join("to-do-or-die.timer");
     fs::write(&timer_path, timer_unit(interval_minutes))?;
-    println!("✓ Created {}", timer_path.display());
+    println!("[ok] Created {}", timer_path.display());
 
     // Write service unit
     let service_path = systemd_dir.join("to-do-or-die.service");
     fs::write(&service_path, service_unit())?;
-    println!("✓ Created {}", service_path.display());
+    println!("[ok] Created {}", service_path.display());
 
     // Reload systemd daemon
     run_systemctl(&["--user", "daemon-reload"])?;
-    println!("✓ Reloaded systemd daemon");
+    println!("[ok] Reloaded systemd daemon");
 
     // Enable and start timer
     run_systemctl(&["--user", "enable", "--now", "to-do-or-die.timer"])?;
-    println!("✓ Enabled and started timer");
+    println!("[ok] Enabled and started timer");
 
     // Enable lingering so timer runs when logged out
     if enable_linger {
         enable_lingering()?;
-        println!("✓ Enabled lingering (timer will run when logged out)");
+        println!("[ok] Enabled lingering (timer will run when logged out)");
     }
 
     println!(
-        "\n🎯 Installation complete! The timer will check todos every {} minutes.",
+        "\nInstallation complete. The timer will check todos every {} minutes.",
         interval_minutes
     );
-    println!("   Run 'to-do-or-die status' to verify it's running.");
+    println!("Run 'to-do-or-die status' to verify it's running.");
 
     Ok(())
 }
 
 /// Uninstall systemd user timer and service
 pub fn uninstall() -> Result<(), InstallerError> {
-    // Stop and disable timer
     let _ = run_systemctl(&["--user", "stop", "to-do-or-die.timer"]);
     let _ = run_systemctl(&["--user", "disable", "to-do-or-die.timer"]);
-    println!("✓ Stopped and disabled timer");
+    println!("[ok] Stopped and disabled timer");
 
-    // Remove unit files
     let systemd_dir = paths::systemd_user_dir();
     let timer_path = systemd_dir.join("to-do-or-die.timer");
     let service_path = systemd_dir.join("to-do-or-die.service");
 
     if timer_path.exists() {
         fs::remove_file(&timer_path)?;
-        println!("✓ Removed {}", timer_path.display());
+        println!("[ok] Removed {}", timer_path.display());
     }
 
     if service_path.exists() {
         fs::remove_file(&service_path)?;
-        println!("✓ Removed {}", service_path.display());
+        println!("[ok] Removed {}", service_path.display());
     }
 
-    // Reload daemon
     run_systemctl(&["--user", "daemon-reload"])?;
-    println!("✓ Reloaded systemd daemon");
+    println!("[ok] Reloaded systemd daemon");
 
-    println!("\n✅ Uninstallation complete. Background monitoring stopped.");
+    println!("\nUninstallation complete. Background monitoring stopped.");
 
     Ok(())
 }
@@ -229,8 +249,7 @@ mod tests {
     fn test_service_unit_generation() {
         let unit = service_unit();
         assert!(unit.contains("Type=oneshot"));
-        // The unit contains the full path to the binary + "check" command
         assert!(unit.contains("check"));
-        assert!(unit.contains("DISPLAY=:0"));
+        assert!(unit.contains("DISPLAY="));
     }
 }

@@ -1,7 +1,6 @@
 # Rust build artifacts
 /target/
 **/*.rs.bk
-Cargo.lock
 
 # IDE
 .idea/
@@ -16,3 +15,6 @@ Thumbs.db
 # Local data (don't commit user's todos!)
 db.json
 *.log
+
+# Private documentation (local interview prep notes, not part of the public repo)
+docs/

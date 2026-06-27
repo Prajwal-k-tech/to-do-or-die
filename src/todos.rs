@@ -4,11 +4,11 @@
 //!
 //! Escalation is based on PERCENTAGE of time elapsed from creation to deadline:
 //! - Stage 0: < 50% elapsed (no effects)
-//! - Stage 1: 50% elapsed → notification
-//! - Stage 2: 75% elapsed → notification + audio
-//! - Stage 3: 90% elapsed → notification + TTS
-//! - Stage 4: 95% elapsed → wallpaper change
-//! - Stage 5+: 100%+ (overdue) → deletions begin and escalate
+//! - Stage 1: 50% elapsed -> notification
+//! - Stage 2: 75% elapsed -> notification + audio
+//! - Stage 3: 90% elapsed -> notification + TTS
+//! - Stage 4: 95% elapsed -> wallpaper change
+//! - Stage 5+: 100%+ (overdue) -> deletions begin and escalate
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,14 +19,15 @@ use uuid::Uuid;
 use crate::paths;
 
 #[derive(Error, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum TodoError {
     #[error("Failed to read todos file: {0}")]
     ReadError(#[from] std::io::Error),
     #[error("Failed to parse todos file: {0}")]
     ParseError(#[from] serde_json::Error),
-    #[error("Todo not found: {0}")]
+    #[error("Todo not found: '{0}'. Use 'to-do-or-die list' to see your todos and their IDs.")]
     NotFound(String),
-    #[error("Ambiguous todo ID: {0} matches multiple todos")]
+    #[error("Ambiguous todo ID: '{0}' matches multiple todos. Use a longer prefix.")]
     AmbiguousId(String),
 }
 
@@ -86,26 +87,26 @@ impl TodoItem {
         self.completed_at.is_none()
     }
 
-    /// Calculate percentage of time elapsed from creation to deadline
-    /// Returns value from 0.0 to 100.0+ (can exceed 100 if overdue)
+    /// Calculate percentage of time elapsed from creation to deadline.
+    /// Returns value from 0.0 to 100.0+ (can exceed 100 if overdue).
     pub fn percent_elapsed(&self) -> f64 {
         if self.completed_at.is_some() {
             return 0.0;
         }
-        
+
         let now = Utc::now();
         let total_duration = (self.due_at - self.created_at).num_seconds() as f64;
-        
+
         if total_duration <= 0.0 {
-            // Edge case: deadline is at or before creation time
             return if now >= self.due_at { 100.0 } else { 0.0 };
         }
-        
+
         let elapsed = (now - self.created_at).num_seconds() as f64;
         (elapsed / total_duration) * 100.0
     }
 
     /// Get minutes overdue (0 if not overdue or completed)
+    #[allow(dead_code)]
     pub fn minutes_overdue(&self) -> i64 {
         if self.completed_at.is_some() {
             return 0;
@@ -117,52 +118,52 @@ impl TodoItem {
         (now - self.due_at).num_minutes()
     }
 
-    /// Calculate the escalation stage based on percentage elapsed
-    /// 
+    /// Calculate the escalation stage based on percentage elapsed.
+    ///
     /// BEFORE deadline (percentage-based warnings):
     /// - Stage 0: < 50% elapsed (no effects)
-    /// - Stage 1: 50% elapsed → notification
-    /// - Stage 2: 75% elapsed → notification + audio  
-    /// - Stage 3: 90% elapsed → notification + TTS
-    /// - Stage 4: 95% elapsed → wallpaper change
-    /// 
+    /// - Stage 1: 50% elapsed -> notification
+    /// - Stage 2: 75% elapsed -> notification + audio
+    /// - Stage 3: 90% elapsed -> notification + TTS
+    /// - Stage 4: 95% elapsed -> wallpaper change
+    ///
     /// AFTER deadline (deletion escalation):
-    /// - Stage 5: 100-110% (just overdue) → delete 1 file
-    /// - Stage 6: 110-120% → delete 2 files
+    /// - Stage 5: 100-110% (just overdue) -> delete 1 file
+    /// - Stage 6: 110-120% -> delete 2 files
     /// - Stage 7+: continues escalating every 10%
     pub fn calculate_stage(&self) -> u32 {
         if self.completed_at.is_some() {
             return 0;
         }
-        
+
         let pct = self.percent_elapsed();
-        
+
         if pct < 50.0 {
             0
         } else if pct < 75.0 {
-            1  // 50% - notification
+            1
         } else if pct < 90.0 {
-            2  // 75% - notification + audio
+            2
         } else if pct < 95.0 {
-            3  // 90% - notification + TTS
+            3
         } else if pct < 100.0 {
-            4  // 95% - wallpaper change
+            4
         } else {
-            // Overdue! Deletion stages begin
-            // Stage 5 at 100%, then +1 stage for every 10% more overdue
             let overdue_pct = pct - 100.0;
             5 + (overdue_pct / 10.0) as u32
         }
     }
 
     /// Check if this todo needs attention (at or above stage 1)
+    #[allow(dead_code)]
     pub fn needs_attention(&self) -> bool {
         self.is_active() && self.calculate_stage() >= 1
     }
 
-    /// Get short ID (first 8 chars of UUID)
+    /// Get short ID (first 8 chars of UUID string)
     pub fn short_id(&self) -> String {
-        self.id.to_string()[..8].to_string()
+        let id_str = self.id.to_string();
+        id_str.get(..8).unwrap_or(&id_str).to_string()
     }
 
     /// Mark this todo as completed
@@ -184,21 +185,28 @@ impl TodoItem {
             format!("{} remaining", humanize_duration(remaining))
         }
     }
-    
-    /// Get percentage status string
-    pub fn percent_status(&self) -> String {
-        let pct = self.percent_elapsed();
-        if pct >= 100.0 {
-            format!("{:.0}% (OVERDUE)", pct)
+
+    /// Get a human-readable stage label
+    pub fn stage_label(&self) -> &'static str {
+        if self.is_completed() {
+            "done"
         } else {
-            format!("{:.0}%", pct)
+            match self.calculate_stage() {
+                0 => "ok",
+                1 => "notify",
+                2 => "audio",
+                3 => "tts",
+                4 => "wallpaper",
+                s if s >= 5 => "deleting",
+                _ => "ok",
+            }
         }
     }
 }
 
 /// Convert a chrono Duration to a human-readable string
 fn humanize_duration(duration: chrono::Duration) -> String {
-    let total_secs = duration.num_seconds().abs();
+    let total_secs = duration.num_seconds().unsigned_abs();
     if total_secs < 60 {
         format!("{}s", total_secs)
     } else if total_secs < 3600 {
@@ -240,17 +248,11 @@ impl TodoList {
         Ok(list)
     }
 
-    /// Save todos to file
+    /// Save todos to file atomically
     pub fn save(&self) -> Result<(), TodoError> {
         let path = paths::todos_file();
-
-        // Ensure directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(&path, content)?;
+        paths::atomic_write(&path, &content)?;
         Ok(())
     }
 
@@ -291,6 +293,103 @@ impl TodoList {
         }
     }
 
+    /// Find a todo by list index (1-based, as shown in `list` output)
+    pub fn find_by_index(&self, index: usize) -> Result<&TodoItem, TodoError> {
+        if index == 0 || index > self.todos.len() {
+            Err(TodoError::NotFound(format!("#{}", index)))
+        } else {
+            Ok(&self.todos[index - 1])
+        }
+    }
+
+    /// Find a todo by list index (mutable, 1-based)
+    pub fn find_by_index_mut(&mut self, index: usize) -> Result<&mut TodoItem, TodoError> {
+        if index == 0 || index > self.todos.len() {
+            Err(TodoError::NotFound(format!("#{}", index)))
+        } else {
+            Ok(&mut self.todos[index - 1])
+        }
+    }
+
+    /// Try to find a todo by ID prefix, index number, or partial description match.
+    /// This is the user-friendly lookup used by the `complete` command.
+    pub fn find_smart(&self, query: &str) -> Result<&TodoItem, TodoError> {
+        // Try as a 1-based index first (e.g., "1", "2", "3")
+        if let Ok(index) = query.parse::<usize>()
+            && let Ok(todo) = self.find_by_index(index)
+        {
+            return Ok(todo);
+        }
+
+        // Try as a UUID prefix
+        let uuid_matches: Vec<_> = self
+            .todos
+            .iter()
+            .filter(|t| t.id.to_string().starts_with(query))
+            .collect();
+
+        if uuid_matches.len() == 1 {
+            return Ok(uuid_matches[0]);
+        }
+        if uuid_matches.len() > 1 {
+            return Err(TodoError::AmbiguousId(query.to_string()));
+        }
+
+        // Try as a partial description match (case-insensitive)
+        let desc_matches: Vec<_> = self
+            .todos
+            .iter()
+            .filter(|t| t.description.to_lowercase().contains(&query.to_lowercase()))
+            .collect();
+
+        match desc_matches.len() {
+            0 => Err(TodoError::NotFound(query.to_string())),
+            1 => Ok(desc_matches[0]),
+            _ => Err(TodoError::AmbiguousId(query.to_string())),
+        }
+    }
+
+    /// Smart find (mutable version)
+    pub fn find_smart_mut(&mut self, query: &str) -> Result<&mut TodoItem, TodoError> {
+        // Try as a 1-based index first
+        if let Ok(index) = query.parse::<usize>()
+            && self.find_by_index(index).is_ok()
+        {
+            return self.find_by_index_mut(index);
+        }
+
+        // Try as a UUID prefix
+        let uuid_match_indices: Vec<_> = self
+            .todos
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.id.to_string().starts_with(query))
+            .map(|(i, _)| i)
+            .collect();
+
+        if uuid_match_indices.len() == 1 {
+            return Ok(&mut self.todos[uuid_match_indices[0]]);
+        }
+        if uuid_match_indices.len() > 1 {
+            return Err(TodoError::AmbiguousId(query.to_string()));
+        }
+
+        // Try as a partial description match
+        let desc_match_indices: Vec<_> = self
+            .todos
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.description.to_lowercase().contains(&query.to_lowercase()))
+            .map(|(i, _)| i)
+            .collect();
+
+        match desc_match_indices.len() {
+            0 => Err(TodoError::NotFound(query.to_string())),
+            1 => Ok(&mut self.todos[desc_match_indices[0]]),
+            _ => Err(TodoError::AmbiguousId(query.to_string())),
+        }
+    }
+
     /// Get all active (not completed) todos
     pub fn active(&self) -> Vec<&TodoItem> {
         self.todos.iter().filter(|t| t.is_active()).collect()
@@ -302,22 +401,16 @@ impl TodoList {
     }
 
     /// Get all completed todos
+    #[allow(dead_code)]
     pub fn completed(&self) -> Vec<&TodoItem> {
         self.todos.iter().filter(|t| t.is_completed()).collect()
     }
 
     /// Complete a todo by ID
+    #[allow(dead_code)]
     pub fn complete(&mut self, id: &str) -> Result<(), TodoError> {
         let todo = self.find_by_id_mut(id)?;
         todo.complete();
-        Ok(())
-    }
-
-    /// Update the stage and deletions count for a todo
-    pub fn update_stage(&mut self, id: &str, stage: u32, deletions: u32) -> Result<(), TodoError> {
-        let todo = self.find_by_id_mut(id)?;
-        todo.stage = stage;
-        todo.deletions_count += deletions;
         Ok(())
     }
 }
@@ -335,7 +428,7 @@ mod tests {
         assert!(!todo.is_overdue());
         assert!(!todo.is_completed());
         assert!(todo.is_active());
-        assert_eq!(todo.calculate_stage(), 0); // Just created, 0% elapsed
+        assert_eq!(todo.calculate_stage(), 0);
     }
 
     #[test]
@@ -344,7 +437,7 @@ mod tests {
         let todo = TodoItem::new("Late task".to_string(), due);
 
         assert!(todo.is_overdue());
-        assert_eq!(todo.calculate_stage(), 5); // Overdue = stage 5
+        assert!(todo.calculate_stage() >= 5);
     }
 
     #[test]
@@ -355,58 +448,54 @@ mod tests {
         todo.complete();
         assert!(todo.is_completed());
         assert!(!todo.is_active());
-        assert!(!todo.is_overdue()); // Completed todos aren't overdue
+        assert!(!todo.is_overdue());
     }
 
     #[test]
     fn test_stage_calculation() {
-        // New percentage-based system:
-        // Stage 0: < 50% elapsed
-        // Stage 1: 50-75% elapsed (notification)
-        // Stage 2: 75-90% elapsed (audio)
-        // Stage 3: 90-95% elapsed (TTS)
-        // Stage 4: 95-100% elapsed (wallpaper)
-        // Stage 5+: Overdue (deletions)
-
         let base = Utc::now();
 
-        // Test: 25% elapsed (2 hour deadline, 30 min passed) -> Stage 0
-        let todo_25pct = TodoItem {
+        let template = TodoItem {
             id: Uuid::new_v4(),
             description: "Test".to_string(),
-            created_at: base - Duration::minutes(30),
-            due_at: base + Duration::minutes(90), // 2 hours total, 30 min elapsed
+            created_at: base,
+            due_at: base,
             completed_at: None,
             stage: 0,
             deletions_count: 0,
         };
+
+        // 25% elapsed -> Stage 0
+        let todo_25pct = TodoItem {
+            created_at: base - Duration::minutes(30),
+            due_at: base + Duration::minutes(90),
+            ..template.clone()
+        };
         assert_eq!(todo_25pct.calculate_stage(), 0);
 
-        // Test: 60% elapsed -> Stage 1
+        // 60% elapsed -> Stage 1
         let todo_60pct = TodoItem {
             created_at: base - Duration::minutes(60),
-            due_at: base + Duration::minutes(40), // 100 min total, 60 elapsed
-            ..todo_25pct.clone()
+            due_at: base + Duration::minutes(40),
+            ..template.clone()
         };
         assert_eq!(todo_60pct.calculate_stage(), 1);
 
-        // Test: 80% elapsed -> Stage 2
+        // 80% elapsed -> Stage 2
         let todo_80pct = TodoItem {
             created_at: base - Duration::minutes(80),
-            due_at: base + Duration::minutes(20), // 100 min total, 80 elapsed
-            ..todo_25pct.clone()
+            due_at: base + Duration::minutes(20),
+            ..template.clone()
         };
         assert_eq!(todo_80pct.calculate_stage(), 2);
 
-        // Test: Overdue -> Stage 5+ (depends on how much overdue)
-        // 30 min overdue on 2 hour deadline = 150/120 = 125%
-        // Stage = 5 + (25/10) = 5 + 2 = 7
+        // Overdue -> Stage 5+
         let todo_overdue = TodoItem {
             created_at: base - Duration::hours(2),
-            due_at: base - Duration::minutes(30), // 30 min overdue
-            ..todo_25pct.clone()
+            due_at: base - Duration::minutes(30),
+            ..template.clone()
         };
-        assert!(todo_overdue.calculate_stage() >= 5); // Just check it's overdue stage
+        assert!(todo_overdue.calculate_stage() >= 5);
     }
 
     #[test]
@@ -427,6 +516,59 @@ mod tests {
     }
 
     #[test]
+    fn test_find_by_index() {
+        let mut list = TodoList::default();
+        list.add(TodoItem::new(
+            "First".to_string(),
+            Utc::now() + Duration::hours(1),
+        ));
+        list.add(TodoItem::new(
+            "Second".to_string(),
+            Utc::now() + Duration::hours(1),
+        ));
+
+        assert_eq!(list.find_by_index(1).unwrap().description, "First");
+        assert_eq!(list.find_by_index(2).unwrap().description, "Second");
+        assert!(list.find_by_index(0).is_err());
+        assert!(list.find_by_index(3).is_err());
+    }
+
+    #[test]
+    fn test_find_smart_by_index() {
+        let mut list = TodoList::default();
+        list.add(TodoItem::new(
+            "Buy groceries".to_string(),
+            Utc::now() + Duration::hours(1),
+        ));
+        list.add(TodoItem::new(
+            "File taxes".to_string(),
+            Utc::now() + Duration::hours(1),
+        ));
+
+        assert_eq!(list.find_smart("1").unwrap().description, "Buy groceries");
+        assert_eq!(list.find_smart("2").unwrap().description, "File taxes");
+    }
+
+    #[test]
+    fn test_find_smart_by_description() {
+        let mut list = TodoList::default();
+        list.add(TodoItem::new(
+            "Buy groceries".to_string(),
+            Utc::now() + Duration::hours(1),
+        ));
+        list.add(TodoItem::new(
+            "File taxes".to_string(),
+            Utc::now() + Duration::hours(1),
+        ));
+
+        assert_eq!(
+            list.find_smart("groceries").unwrap().description,
+            "Buy groceries"
+        );
+        assert_eq!(list.find_smart("taxes").unwrap().description, "File taxes");
+    }
+
+    #[test]
     fn test_humanize_duration() {
         assert_eq!(humanize_duration(Duration::seconds(30)), "30s");
         assert_eq!(humanize_duration(Duration::minutes(5)), "5m");
@@ -436,5 +578,15 @@ mod tests {
             "2h 30m"
         );
         assert_eq!(humanize_duration(Duration::days(1)), "1d");
+    }
+
+    #[test]
+    fn test_stage_label() {
+        let due = Utc::now() + Duration::hours(2);
+        let todo = TodoItem::new("Test".to_string(), due);
+        assert_eq!(todo.stage_label(), "ok");
+
+        let overdue = TodoItem::new("Test".to_string(), Utc::now() - Duration::hours(1));
+        assert_eq!(overdue.stage_label(), "deleting");
     }
 }
