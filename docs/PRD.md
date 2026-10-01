@@ -48,7 +48,7 @@
 │  Stage 1: Notification                                          │
 │  Stage 2: Audio alert                                           │
 │  Stage 3: TTS announcement                                      │
-│  Stage 4: Wallpaper change                                      │
+│  Stage 4: Desktop appearance setting                            │
 │  Stage 5+: File deletion (escalating count)                     │
 └─────────────────────────────────────────────────────────────────┘
 ```

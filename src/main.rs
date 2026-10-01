@@ -4,7 +4,7 @@
 //! 1. Desktop notifications
 //! 2. Audio alerts
 //! 3. Text-to-speech announcements
-//! 4. Wallpaper changes
+//! 4. Desktop appearance setting
 //! 5. File deletion (starting with cache/cookies, moved to trash by default)
 
 mod checker;
@@ -716,7 +716,10 @@ fn cmd_targets(action: TargetsAction, use_color: bool) -> Result<()> {
 
             println!("\n Deletion Target Directories\n");
 
-            println!("  Tier 1 (Built-in, always safe):");
+            println!("  Tier 1 (Built-in candidates; inspect before enabling):");
+            println!(
+                "    Cache, browser cookies, trash, and old downloads can still contain useful data."
+            );
             let tier1_dirs = [
                 ("~/.cache/*", "Application caches"),
                 ("~/.local/share/Trash/*", "Trash bin"),
@@ -780,9 +783,8 @@ fn cmd_targets(action: TargetsAction, use_color: bool) -> Result<()> {
             let expanded = paths::expand_tilde(&path);
 
             // Validate path safety (rejects root, home, system dirs, protected paths)
+            safety::validate_target_path(&expanded)?;
             if expanded.exists() {
-                safety::validate_target_path(&expanded)?;
-
                 if !expanded.is_dir() {
                     anyhow::bail!("Path must be a directory: {}", expanded.display());
                 }
@@ -1231,7 +1233,7 @@ fn cmd_doctor(use_color: bool) -> Result<()> {
         println!("         Rebuild with: cargo build --features audio");
     }
 
-    // Wallpaper: gsettings
+    // Desktop appearance setting: GNOME background color or KDE color scheme.
     if effects::command_exists("gsettings") {
         if use_color {
             println!(

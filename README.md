@@ -270,7 +270,7 @@ User CLI  -->  systemd User Timer  -->  Deadline Checker  -->  Effects Chain
 
 ```bash
 cargo build              # Build
-cargo test               # Run 43+ unit tests
+cargo test               # Run the unit tests
 cargo clippy --all-targets  # Lint (zero warnings)
 cargo fmt                # Format code
 cargo build --features audio  # Build with native audio

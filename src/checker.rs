@@ -6,7 +6,7 @@
 //! - Stage 1 (50%): Notification
 //! - Stage 2 (75%): Notification + Audio
 //! - Stage 3 (90%): Notification + TTS
-//! - Stage 4 (95%): Desktop appearance effect (GNOME/KDE) plus notification
+//! - Stage 4 (95%): Desktop appearance setting (GNOME/KDE) plus notification
 //! - Stage 5+ (100%+): File deletions begin
 //!
 //! Important: non-destructive effects (notification, audio, TTS, appearance) only
