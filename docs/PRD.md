@@ -18,7 +18,7 @@
 3. **As a user**, I want escalating annoyances when I miss deadlines
 4. **As a user**, I want file deletion disabled by default and limited to configured candidates when enabled
 5. **As a user**, I want to see what files would be deleted before it happens (dry-run for testing)
-6. **As a user**, I want to enable extreme mode for maximum stakes
+6. **Future scope, not V1:** As a user, I may want an optional extreme mode for maximum stakes. This needs a separate safety and confirmation design before implementation.
 
 ## Architecture
 
@@ -175,13 +175,13 @@ tier2_paths = [
 ]
 ```
 
-### Tier 3: Extreme Mode (Requires --extreme)
+### Tier 3: Extreme Mode (Future scope, not implemented)
 
 When enabled with `--extreme` flag:
 - Can delete from any user-writable location
 - Requires explicit typed confirmation
 - May require root for some operations
-- **NOT IMPLEMENTED IN V1**
+- **Not part of V1.** Do not imply the CLI supports `--extreme` until a separate design, implementation and safety review are complete.
 
 ## Blocklist (Never Delete)
 
@@ -337,9 +337,9 @@ thiserror = "2"
 ### Phase 5: Polish
 - [x] Error handling with thiserror
 - [x] Unit tests for safety module
-- [ ] Integration tests
+- [x] Linux CLI integration tests for staged effects, safe defaults, dry-run, explicitly configured fixture deletion and audit logging
 - [x] README documentation
-- [ ] --extreme mode (Tier 3)
+- [ ] Tier 3 `--extreme` mode (future scope; requires separate safety design)
 
 ## Testing Strategy
 
@@ -350,9 +350,12 @@ thiserror = "2"
 - `safety.rs`: Blocklist enforcement, candidate filtering
 
 ### Integration Tests
-- Full CLI workflow: add → check → effects triggered
-- Dry-run verification: no actual deletions
-- Timer simulation: stage progression
+- Stage progression through the CLI: a 0-to-4 transition triggers the appearance command once
+- Fresh-install safe default: forcing a live check still cannot delete while deletion is disabled
+- Dry-run: fixture files remain and no deletion audit entry is written
+- Explicitly configured temporary target: live deletion affects the fixture file and writes an audit entry
+
+The current automated integration tests isolate `HOME`, XDG paths, the desktop appearance command and D-Bus address in a temporary fixture. They do not install a systemd timer or exercise a real desktop notification service.
 
 ### Manual Testing
 - Install/uninstall timer

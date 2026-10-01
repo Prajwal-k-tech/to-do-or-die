@@ -43,6 +43,10 @@ This tool deletes files, so safety is the top priority:
 - **Atomic writes**: Config and todo files are written atomically (write to temp, then rename) to prevent corruption from crashes.
 - **File locking**: A lock file prevents concurrent checker processes from interfering.
 
+## Current Scope
+
+The current version supports built-in candidates and user-configured Tier 2 targets. The broader Tier 3 `--extreme` mode described as a future idea in the PRD is not implemented. Automated Linux integration tests cover stage transitions, the fresh-install deletion default, dry-run behavior, explicitly enabled deletion in an isolated temporary home, and its audit record.
+
 ## Installation
 
 ### Prerequisites
