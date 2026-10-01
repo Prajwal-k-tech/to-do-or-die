@@ -7,7 +7,7 @@
 //! - Stage 1: 50% elapsed -> notification
 //! - Stage 2: 75% elapsed -> notification + audio
 //! - Stage 3: 90% elapsed -> notification + TTS
-//! - Stage 4: 95% elapsed -> wallpaper change
+//! - Stage 4: 95% elapsed -> desktop appearance effect
 //! - Stage 5+: 100%+ (overdue) -> deletions begin and escalate
 
 use chrono::{DateTime, Utc};
@@ -125,7 +125,7 @@ impl TodoItem {
     /// - Stage 1: 50% elapsed -> notification
     /// - Stage 2: 75% elapsed -> notification + audio
     /// - Stage 3: 90% elapsed -> notification + TTS
-    /// - Stage 4: 95% elapsed -> wallpaper change
+    /// - Stage 4: 95% elapsed -> desktop appearance effect
     ///
     /// AFTER deadline (deletion escalation):
     /// - Stage 5: 100-110% (just overdue) -> delete 1 file
@@ -196,7 +196,7 @@ impl TodoItem {
                 1 => "notify",
                 2 => "audio",
                 3 => "tts",
-                4 => "wallpaper",
+                4 => "appearance",
                 s if s >= 5 => "deleting",
                 _ => "ok",
             }

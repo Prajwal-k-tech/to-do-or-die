@@ -6,10 +6,10 @@
 //! - Stage 1 (50%): Notification
 //! - Stage 2 (75%): Notification + Audio
 //! - Stage 3 (90%): Notification + TTS
-//! - Stage 4 (95%): Wallpaper change
+//! - Stage 4 (95%): Desktop appearance effect (GNOME/KDE) plus notification
 //! - Stage 5+ (100%+): File deletions begin
 //!
-//! Important: non-destructive effects (notification, audio, TTS, wallpaper) only
+//! Important: non-destructive effects (notification, audio, TTS, appearance) only
 //! fire on stage TRANSITIONS (when the stage increases). This prevents spamming
 //! the user with notifications every 5 minutes. However, DELETIONS fire on EVERY
 //! check when the todo is overdue (stage >= 5), not just on transitions. This is
@@ -235,13 +235,13 @@ fn trigger_effects_for_stage(
         }
     }
 
-    // Stage 4+ (95%+): Wallpaper
-    if stage >= 4 && config.notifications.wallpaper_enabled {
+    // Stage 4+ (95%+): Desktop appearance effect
+    if stage >= 4 && config.notifications.appearance_enabled {
         if dry_run {
-            triggered.push("wallpaper".to_string());
+            triggered.push("appearance".to_string());
         } else {
-            effects::set_warning_wallpaper(&todo.description)?;
-            triggered.push("wallpaper".to_string());
+            effects::set_warning_desktop_appearance(&todo.description)?;
+            triggered.push("appearance".to_string());
         }
     }
 

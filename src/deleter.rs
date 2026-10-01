@@ -58,7 +58,7 @@ impl AuditEntry {
         }
     }
 
-    /// Create an effect audit entry (notification, audio, tts, wallpaper)
+    /// Create an effect audit entry (notification, audio, tts, appearance)
     #[allow(dead_code)]
     pub fn effect(todo_id: &str, action: &str, message: &str, stage: u32) -> Self {
         AuditEntry {
