@@ -2,13 +2,13 @@
 
 ## Overview
 
-**to-do-or-die** is a Rust CLI that enforces todo deadlines through escalating chaos effects. When deadlines pass, the system triggers progressively more aggressive consequences—from gentle notifications to deleting files—to motivate task completion.
+**to-do-or-die** is a Rust CLI that escalates deadline reminders. At 95%, it attempts a GNOME background-color setting or applies KDE's BreezeDark color scheme; these changes are not automatically restored and do not replace wallpaper images. After the deadline, it can delete selected files, but deletion is disabled by default.
 
 ### Core Philosophy
 - **Simple CLI**: User only interacts to add todos and mark them complete
 - **Invisible enforcement**: Background monitoring via systemd user timer
 - **Escalating consequences**: Effects intensify as deadline overage grows
-- **Safe by default**: Destructive actions limited to recoverable files
+- **Safe by default**: Dry-run starts enabled and live deletion starts disabled
 - **Educational**: Built for learning Rust, systemd, and system programming
 
 ## User Stories
@@ -16,9 +16,9 @@
 1. **As a user**, I want to add a todo with a deadline so I'm held accountable
 2. **As a user**, I want the system to automatically start enforcing after install
 3. **As a user**, I want escalating annoyances when I miss deadlines
-4. **As a user**, I want file deletion to be limited to safe, recoverable files by default
+4. **As a user**, I want file deletion disabled by default and limited to configured candidates when enabled
 5. **As a user**, I want to see what files would be deleted before it happens (dry-run for testing)
-6. **As a user**, I want to enable extreme mode for maximum stakes
+6. **Future scope, not V1:** As a user, I may want an optional extreme mode for maximum stakes. This needs a separate safety and confirmation design before implementation.
 
 ## Architecture
 
@@ -48,7 +48,7 @@
 │  Stage 1: Notification                                          │
 │  Stage 2: Audio alert                                           │
 │  Stage 3: TTS announcement                                      │
-│  Stage 4: Wallpaper change                                      │
+│  Stage 4: Desktop appearance setting                            │
 │  Stage 5+: File deletion (escalating count)                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -63,7 +63,7 @@ src/
 ├── config.rs        # Config struct, TOML persistence
 ├── installer.rs     # systemd service/timer setup
 ├── checker.rs       # Deadline checking logic
-├── effects.rs       # Notifications, audio, TTS, wallpaper
+├── effects.rs       # Notifications, audio, TTS, desktop appearance effect
 ├── safety.rs        # File candidate gathering, blocklist
 ├── deleter.rs       # Deletion execution + audit logging
 └── paths.rs         # XDG path helpers
@@ -127,7 +127,7 @@ Effects escalate based on **percentage of time elapsed** BEFORE the deadline:
 | 1 | 50-74% | Desktop notification |
 | 2 | 75-89% | Notification + audio alert |
 | 3 | 90-94% | Notification + TTS announcement |
-| 4 | 95-99% | Notification + wallpaper change |
+| 4 | 95-99% | Notification + desktop appearance effect on GNOME/KDE (notification fallback elsewhere) |
 | 5 | 100%+ (overdue) | Delete 1 file |
 | 6 | 110%+ | Delete 2 files |
 | 7 | 120%+ | Delete 3 files |
@@ -137,8 +137,8 @@ Effects escalate based on **percentage of time elapsed** BEFORE the deadline:
 - At 1 hour (50%): notification
 - At 1.5 hours (75%): notification + audio
 - At 1h 48m (90%): notification + TTS
-- At 1h 54m (95%): wallpaper change
-- At 2 hours (100%): deletions begin!
+- At 1h 54m (95%): desktop appearance effect on GNOME/KDE, or notification fallback
+- At 2 hours (100%): if live deletion is enabled, eligible deletions begin
 
 **Deletion formula**: `min(stage - 4, escalation_cap)` files per check
 
@@ -146,7 +146,7 @@ Effects escalate based on **percentage of time elapsed** BEFORE the deadline:
 
 ### Tier 1: Cache & Cookies (Default)
 
-Always safe to delete, recoverable through normal use:
+Built-in candidates (not guaranteed to be disposable):
 
 ```
 ~/.cache/*                                    # Application caches
@@ -154,7 +154,7 @@ Always safe to delete, recoverable through normal use:
 ~/Downloads/*.{tmp,part,crdownload}           # Incomplete downloads
 ~/Downloads/* (older than 30 days)            # Old downloads
 
-# Browser cookies (causes annoying re-logins)
+# Browser cookies (removal can sign the user out)
 ~/.config/google-chrome/Default/Cookies
 ~/.config/google-chrome/Default/Cookies-journal
 ~/.config/chromium/Default/Cookies
@@ -175,13 +175,13 @@ tier2_paths = [
 ]
 ```
 
-### Tier 3: Extreme Mode (Requires --extreme)
+### Tier 3: Extreme Mode (Future scope, not implemented)
 
 When enabled with `--extreme` flag:
 - Can delete from any user-writable location
 - Requires explicit typed confirmation
 - May require root for some operations
-- **NOT IMPLEMENTED IN V1**
+- **Not part of V1.** Do not imply the CLI supports `--extreme` until a separate design, implementation and safety review are complete.
 
 ## Blocklist (Never Delete)
 
@@ -207,16 +207,16 @@ These paths are always protected:
 [general]
 check_interval_minutes = 5       # Timer interval
 escalation_cap = 10              # Max deletions per check
-dry_run = false                  # Default: real deletions
+dry_run = true                   # Default: preview only
 
 [notifications]
 enabled = true
 sound_enabled = true
 tts_enabled = true
-wallpaper_enabled = true
+appearance_enabled = true        # GNOME/KDE setting; notification fallback elsewhere
 
 [deletion]
-enabled = true
+enabled = false                  # Default: deletion disabled
 tier1_enabled = true             # Cache, cookies, trash
 tier2_enabled = true             # User-configured paths
 tier2_paths = []                 # Custom safe directories
@@ -325,7 +325,7 @@ thiserror = "2"
 - [x] `effects.rs` - Desktop notifications
 - [x] `effects.rs` - Audio alerts (rodio)
 - [x] `effects.rs` - TTS via espeak-ng
-- [x] `effects.rs` - Wallpaper change (gsettings)
+- [x] `effects.rs` - Desktop appearance effect (GNOME/KDE; notification fallback)
 
 ### Phase 4: Deletion System
 - [x] `safety.rs` - File candidate gathering
@@ -336,10 +336,10 @@ thiserror = "2"
 
 ### Phase 5: Polish
 - [x] Error handling with thiserror
-- [ ] Unit tests for safety module
-- [ ] Integration tests
-- [ ] README documentation
-- [ ] --extreme mode (Tier 3)
+- [x] Unit tests for safety module
+- [x] Linux CLI integration tests for staged effects, safe defaults, dry-run, explicitly configured fixture deletion and audit logging
+- [x] README documentation
+- [ ] Tier 3 `--extreme` mode (future scope; requires separate safety design)
 
 ## Testing Strategy
 
@@ -350,9 +350,12 @@ thiserror = "2"
 - `safety.rs`: Blocklist enforcement, candidate filtering
 
 ### Integration Tests
-- Full CLI workflow: add → check → effects triggered
-- Dry-run verification: no actual deletions
-- Timer simulation: stage progression
+- Stage progression through the CLI: a 0-to-4 transition triggers the appearance command once
+- Fresh-install safe default: forcing a live check still cannot delete while deletion is disabled
+- Dry-run: fixture files remain and no deletion audit entry is written
+- Explicitly configured temporary target: live deletion affects the fixture file and writes an audit entry
+
+The current automated integration tests isolate `HOME`, XDG paths, the desktop appearance command and D-Bus address in a temporary fixture. They do not install a systemd timer or exercise a real desktop notification service.
 
 ### Manual Testing
 - Install/uninstall timer
@@ -366,7 +369,7 @@ thiserror = "2"
 2. ✅ Timer runs every 5 minutes automatically
 3. ✅ Notifications appear when deadlines pass
 4. ✅ Effects escalate through all stages
-5. ✅ Only Tier 1/2 files are deleted by default
+5. ✅ When explicitly enabled, deletion candidates come from Tier 1/2 only by default
 6. ✅ Blocklisted paths are never touched
 7. ✅ Audit log captures all deletions
 8. ✅ Dry-run mode works for testing

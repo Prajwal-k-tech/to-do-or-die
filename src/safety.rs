@@ -1,7 +1,7 @@
 //! File safety assessment and candidate gathering
 //!
 //! Determines which files are safe to delete based on:
-//! - Tier 1: Cache, cookies, trash (always safe)
+//! - Tier 1: Built-in cache, cookie, trash, and old-download candidates (review before enabling)
 //! - Tier 2: User-configured directories
 //! - Blocklist: Never delete these paths
 //!
@@ -48,7 +48,7 @@ const PROTECTED_SHELL_CONFIGS: &[&str] = &[
 /// File extensions that should never be deleted (cryptographic material)
 const PROTECTED_EXTENSIONS: &[&str] = &["key", "pem", "crt", "cer", "p12", "pfx", "gpg", "asc"];
 
-/// System root directories that must never be used as deletion targets
+/// System root directories whose descendants must never be used as deletion targets
 const FORBIDDEN_TARGET_ROOTS: &[&str] = &[
     "/", "/boot", "/dev", "/etc", "/proc", "/run", "/sys", "/usr", "/var", "/bin", "/sbin", "/lib",
     "/lib64", "/root",
@@ -149,6 +149,10 @@ fn build_blocklist(config: &Config) -> anyhow::Result<HashSet<PathBuf>> {
 fn is_protected(path: &Path, blocklist: &HashSet<PathBuf>) -> bool {
     // 1. Check against blocklist set (canonical prefix match)
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if forbidden_root_for(&canonical).is_some() {
+        return true;
+    }
+
     for blocked in blocklist {
         if canonical == *blocked || canonical.starts_with(blocked) {
             return true;
@@ -225,16 +229,14 @@ pub fn is_path_protected(path: &Path) -> bool {
 pub fn validate_target_path(path: &Path) -> anyhow::Result<()> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
-    // Reject root and system directories
-    let canonical_str = canonical.to_string_lossy();
-    for forbidden in FORBIDDEN_TARGET_ROOTS {
-        if canonical_str.as_ref() == *forbidden {
-            anyhow::bail!(
-                "Cannot add system directory '{}' as a deletion target. \
-                 This would be extremely dangerous.",
-                canonical.display()
-            );
-        }
+    // Reject system roots and every path beneath them, not just the root itself.
+    if let Some(forbidden) = forbidden_root_for(&canonical) {
+        anyhow::bail!(
+            "Cannot add '{}' because it is inside forbidden system directory '{}'. \
+             This would be extremely dangerous.",
+            canonical.display(),
+            forbidden
+        );
     }
 
     // Reject the home directory itself
@@ -266,6 +268,19 @@ pub fn validate_target_path(path: &Path) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Return the forbidden system root containing this path.
+/// The filesystem root is handled by equality so it does not match every absolute path.
+fn forbidden_root_for(path: &Path) -> Option<&'static str> {
+    FORBIDDEN_TARGET_ROOTS.iter().copied().find(|root| {
+        let root_path = Path::new(root);
+        if root_path == Path::new("/") {
+            path == root_path
+        } else {
+            path.starts_with(root_path)
+        }
+    })
 }
 
 /// Gather Tier 1 candidates (cache, cookies, trash, old downloads)
@@ -587,6 +602,26 @@ mod tests {
         assert!(validate_target_path(&PathBuf::from("/")).is_err());
         assert!(validate_target_path(&PathBuf::from("/etc")).is_err());
         assert!(validate_target_path(&PathBuf::from("/boot")).is_err());
+    }
+
+    #[test]
+    fn test_validate_target_rejects_paths_under_system_roots() {
+        assert!(validate_target_path(&PathBuf::from("/etc/to-do-or-die-test")).is_err());
+        assert!(validate_target_path(&PathBuf::from("/var/tmp/to-do-or-die-test")).is_err());
+    }
+
+    #[test]
+    fn test_system_root_paths_are_always_protected() {
+        let blocklist = HashSet::new();
+        assert!(is_protected(&PathBuf::from("/"), &blocklist));
+        assert!(is_protected(
+            &PathBuf::from("/etc/to-do-or-die-test"),
+            &blocklist
+        ));
+        assert!(!is_protected(
+            &PathBuf::from("/home/user/scratch/file.txt"),
+            &blocklist
+        ));
     }
 
     #[test]

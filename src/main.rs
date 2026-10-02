@@ -4,7 +4,7 @@
 //! 1. Desktop notifications
 //! 2. Audio alerts
 //! 3. Text-to-speech announcements
-//! 4. Wallpaper changes
+//! 4. Desktop appearance setting
 //! 5. File deletion (starting with cache/cookies, moved to trash by default)
 
 mod checker;
@@ -433,8 +433,8 @@ fn cmd_config(action: ConfigAction, use_color: bool) -> Result<()> {
                 config.notifications.tts_enabled
             );
             println!(
-                "    wallpaper_enabled = {} # Wallpaper changes",
-                config.notifications.wallpaper_enabled
+                "    appearance_enabled = {} # Try desktop color/theme setting",
+                config.notifications.appearance_enabled
             );
             println!();
             println!("  [deletion]");
@@ -652,7 +652,7 @@ fn cmd_candidates(full_paths: bool, limit: usize, tier_filter: Option<u8>) -> Re
 
     // Sort by file count (most files first)
     let mut dirs: Vec<_> = by_dir.into_iter().collect();
-    dirs.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    dirs.sort_by_key(|a| std::cmp::Reverse(a.1.len()));
 
     let max_dirs = 20;
 
@@ -716,7 +716,10 @@ fn cmd_targets(action: TargetsAction, use_color: bool) -> Result<()> {
 
             println!("\n Deletion Target Directories\n");
 
-            println!("  Tier 1 (Built-in, always safe):");
+            println!("  Tier 1 (Built-in candidates; inspect before enabling):");
+            println!(
+                "    Cache, browser cookies, trash, and old downloads can still contain useful data."
+            );
             let tier1_dirs = [
                 ("~/.cache/*", "Application caches"),
                 ("~/.local/share/Trash/*", "Trash bin"),
@@ -780,9 +783,8 @@ fn cmd_targets(action: TargetsAction, use_color: bool) -> Result<()> {
             let expanded = paths::expand_tilde(&path);
 
             // Validate path safety (rejects root, home, system dirs, protected paths)
+            safety::validate_target_path(&expanded)?;
             if expanded.exists() {
-                safety::validate_target_path(&expanded)?;
-
                 if !expanded.is_dir() {
                     anyhow::bail!("Path must be a directory: {}", expanded.display());
                 }
@@ -1231,35 +1233,36 @@ fn cmd_doctor(use_color: bool) -> Result<()> {
         println!("         Rebuild with: cargo build --features audio");
     }
 
-    // Wallpaper: gsettings
+    // Desktop appearance setting: GNOME background color or KDE color scheme.
     if effects::command_exists("gsettings") {
         if use_color {
             println!(
-                "  {} gsettings       - wallpaper change available (GNOME)",
+                "  {} gsettings       - command found; GNOME setting will be tried",
                 "[ok]".green()
             );
         } else {
-            println!("  [ok] gsettings       - wallpaper change available (GNOME)");
+            println!("  [ok] gsettings       - command found; GNOME setting will be tried");
         }
     } else if effects::command_exists("plasma-apply-colorscheme") {
         if use_color {
             println!(
-                "  {} plasma-apply    - wallpaper change available (KDE)",
+                "  {} plasma-apply    - command found; KDE color scheme will be tried",
                 "[ok]".green()
             );
         } else {
-            println!("  [ok] plasma-apply    - wallpaper change available (KDE)");
+            println!("  [ok] plasma-apply    - command found; KDE color scheme will be tried");
         }
     } else {
-        warnings
-            .push("No wallpaper command found (wallpaper changes will fall back to notifications)");
+        warnings.push("No desktop appearance command found (stage 4 will use notifications only)");
         if use_color {
             println!(
-                "  {} wallpaper       - NOT FOUND (wallpaper changes unavailable)",
+                "  {} appearance      - not available (stage 4 will use notifications only)",
                 "[warn]".yellow()
             );
         } else {
-            println!("  [warn] wallpaper       - NOT FOUND (wallpaper changes unavailable)");
+            println!(
+                "  [warn] appearance      - not available (stage 4 will use notifications only)"
+            );
         }
     }
 
@@ -1471,8 +1474,11 @@ fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<()> {
         "notifications.tts_enabled" | "tts" => {
             config.notifications.tts_enabled = value.parse()?;
         }
-        "notifications.wallpaper_enabled" | "wallpaper" => {
-            config.notifications.wallpaper_enabled = value.parse()?;
+        "notifications.appearance_enabled"
+        | "notifications.wallpaper_enabled"
+        | "appearance"
+        | "wallpaper" => {
+            config.notifications.appearance_enabled = value.parse()?;
         }
         "deletion.enabled" | "deletion" => {
             config.deletion.enabled = value.parse()?;

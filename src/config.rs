@@ -62,8 +62,8 @@ pub struct NotificationConfig {
     pub sound_enabled: bool,
     #[serde(default = "default_true")]
     pub tts_enabled: bool,
-    #[serde(default = "default_true")]
-    pub wallpaper_enabled: bool,
+    #[serde(default = "default_true", alias = "wallpaper_enabled")]
+    pub appearance_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,7 +145,7 @@ impl Default for NotificationConfig {
             enabled: true,
             sound_enabled: true,
             tts_enabled: true,
-            wallpaper_enabled: true,
+            appearance_enabled: true,
         }
     }
 }
@@ -236,6 +236,13 @@ mod tests {
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(config.general.escalation_cap, parsed.general.escalation_cap);
+    }
+
+    #[test]
+    fn test_legacy_wallpaper_config_key() {
+        let parsed: Config =
+            toml::from_str("[notifications]\nwallpaper_enabled = false\n").unwrap();
+        assert!(!parsed.notifications.appearance_enabled);
     }
 
     #[test]

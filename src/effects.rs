@@ -1,4 +1,4 @@
-//! Effect triggers: notifications, audio, TTS, wallpaper
+//! Effect triggers: notifications, audio, TTS, desktop appearance
 //!
 //! All effects are designed to be annoying but not destructive.
 //! Audio playback via rodio is optional (behind the "audio" feature flag).
@@ -17,9 +17,6 @@ pub enum EffectsError {
     AudioError(String),
     #[error("TTS failed: {0}")]
     TtsError(String),
-    #[error("Wallpaper change failed: {0}")]
-    #[allow(dead_code)]
-    WallpaperError(String),
 }
 
 /// Send a desktop notification
@@ -162,10 +159,10 @@ pub fn speak_text(text: &str) -> Result<(), EffectsError> {
     ))
 }
 
-/// Set a warning wallpaper.
-/// Tries GNOME gsettings first, then KDE Plasma, then falls back to a notification.
-pub fn set_warning_wallpaper(todo_description: &str) -> Result<(), EffectsError> {
-    let warning_message = format!("TODO OVERDUE: {}", todo_description);
+/// Apply a desktop appearance setting where supported, then notify the user.
+/// GNOME changes its background color setting; KDE switches to BreezeDark.
+pub fn set_warning_desktop_appearance(todo_description: &str) -> Result<(), EffectsError> {
+    let warning_message = todo_description.to_string();
 
     // Try GNOME gsettings
     let result = Command::new("gsettings")
@@ -189,7 +186,7 @@ pub fn set_warning_wallpaper(todo_description: &str) -> Result<(), EffectsError>
             ])
             .output();
 
-        let _ = send_notification("WALLPAPER WARNING", &warning_message);
+        let _ = send_notification("TODO ALERT", &warning_message);
         return Ok(());
     }
 
@@ -201,12 +198,12 @@ pub fn set_warning_wallpaper(todo_description: &str) -> Result<(), EffectsError>
     if let Ok(output) = result
         && output.status.success()
     {
-        let _ = send_notification("WALLPAPER WARNING", &warning_message);
+        let _ = send_notification("TODO ALERT", &warning_message);
         return Ok(());
     }
 
-    // If we can't change wallpaper, at least send a notification
-    send_notification("WALLPAPER WARNING", &warning_message)?;
+    // Desktop environments without a supported appearance command still get a notification.
+    send_notification("TODO ALERT", &warning_message)?;
 
     Ok(())
 }

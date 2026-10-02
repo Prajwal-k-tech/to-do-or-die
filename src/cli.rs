@@ -27,7 +27,7 @@ use clap::{Parser, Subcommand};
 #[command(long_about = "\
 A todo list with actual consequences. Set a deadline, complete it on time,
 or watch the chaos escalate: notifications, audio alerts, TTS warnings,
-wallpaper changes, and file deletion.
+desktop appearance changes where supported, and file deletion.
 
 By default, the tool runs in dry-run mode with deletion disabled.
 Use 'to-do-or-die config set dry_run false' and
@@ -175,7 +175,7 @@ pub enum Commands {
 
     /// Check system dependencies and configuration
     #[command(
-        after_help = "Verifies that all required system tools are available:\nsystemd, notify-rust (D-Bus), espeak-ng (TTS), gsettings (wallpaper),\nand audio playback support."
+        after_help = "Checks available system tools:\nsystemd, notify-rust (D-Bus), espeak-ng (TTS), GNOME/KDE appearance commands,\nand audio playback support."
     )]
     Doctor,
 }

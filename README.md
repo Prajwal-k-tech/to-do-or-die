@@ -1,6 +1,6 @@
 # to-do-or-die
 
-A command-line todo application that enforces deadlines through escalating consequences. Miss a deadline, and the system progresses from desktop notifications to audio alerts, text-to-speech warnings, wallpaper changes, and ultimately file deletion.
+A command-line todo application that escalates deadline reminders from notifications to audio and text-to-speech. At 95%, it attempts a GNOME background-color setting or applies KDE's BreezeDark color scheme. These appearance changes are not restored automatically, and the program does not change wallpaper images. Overdue file deletion is available but disabled by default.
 
 Built in Rust as a systems programming project demonstrating CLI design, systemd integration, file system safety, and progressive escalation patterns.
 
@@ -14,17 +14,17 @@ Set a todo with a deadline. A systemd user timer checks every 5 minutes. As the 
 | 1 | 50% | Desktop notification |
 | 2 | 75% | Notification + audio alert |
 | 3 | 90% | Notification + text-to-speech |
-| 4 | 95% | Notification + wallpaper change |
+| 4 | 95% | Notification + GNOME background-color or KDE color-scheme setting; notification fallback elsewhere |
 | 5+ | 100%+ (overdue) | File deletion (escalating count) |
 
-When a todo goes overdue, files are deleted on every check cycle. The deletion count escalates: stage 5 deletes 1 file per check, stage 6 deletes 2, and so on, up to a configurable cap.
+When a todo goes overdue, live enforcement deletes eligible files on every check cycle only if deletion has been explicitly enabled and dry-run is off. The count escalates from 1 file per check at stage 5, up to a configurable cap.
 
 **Example**: A 2-hour deadline triggers:
 - At 1 hour (50%): notification
 - At 1.5 hours (75%): notification + audio
 - At 1h 48m (90%): notification + TTS
-- At 1h 54m (95%): wallpaper change
-- At 2 hours (100%): file deletion begins, 1 file per check
+- At 1h 54m (95%): desktop appearance effect on GNOME/KDE, or notification fallback
+- At 2 hours (100%): if live deletion is enabled, 1 eligible file per check
 - At 2h 12m (110%): 2 files per check
 - At 2h 24m (120%): 3 files per check
 
@@ -34,7 +34,7 @@ This tool deletes files, so safety is the top priority:
 
 - **Safe defaults**: New users start in dry-run mode with deletion disabled. You must explicitly enable real enforcement.
 - **Trash by default**: Files are moved to the system trash (recoverable), not permanently deleted. Permanent deletion requires explicit opt-in.
-- **Tiered deletion**: Only safe, recoverable files are targeted by default (caches, cookies, trash bin, old downloads).
+- **Deletion candidates**: The built-in list includes caches, browser cookies, trash, and old downloads. Cookies can sign you out and old downloads may still matter, so inspect candidates before enabling live deletion.
 - **Blocklist protection**: SSH keys, GPG keys, passwords, git repositories, shell configs, and cryptographic files are never deleted.
 - **Path validation**: Root, home directory, and system directories cannot be added as deletion targets.
 - **Symlink protection**: Tier 2 paths are canonicalized before walking. Symlinks are never followed during directory traversal.
@@ -42,6 +42,10 @@ This tool deletes files, so safety is the top priority:
 - **Audit log**: Every deletion is logged with timestamp, file path, and todo ID in JSONL format.
 - **Atomic writes**: Config and todo files are written atomically (write to temp, then rename) to prevent corruption from crashes.
 - **File locking**: A lock file prevents concurrent checker processes from interfering.
+
+## Current Scope
+
+The current version supports built-in candidates and user-configured Tier 2 targets. The broader Tier 3 `--extreme` mode described as a future idea in the PRD is not implemented. Automated Linux integration tests cover stage transitions, the fresh-install deletion default, dry-run behavior, explicitly enabled deletion in an isolated temporary home, and its audit record.
 
 ## Installation
 
@@ -52,7 +56,7 @@ This tool deletes files, so safety is the top priority:
 - Optional system packages for full effect chain:
   - `espeak-ng` for text-to-speech
   - `pulseaudio-utils` (paplay) or `alsa-utils` (aplay) for audio alerts
-  - `gsettings` (GNOME) or `plasma-apply-colorscheme` (KDE) for wallpaper changes
+  - `gsettings` (GNOME) or `plasma-apply-colorscheme` (KDE) for the desktop appearance effect
 
 ### Build and Install
 
@@ -160,7 +164,7 @@ All of these work:
 
 ### Tier 1: Cache and Cookies (Built-in)
 
-Always safe to delete, recoverable through normal use:
+Built-in candidates (not guaranteed to be disposable):
 - `~/.cache/*` - Application caches
 - `~/.local/share/Trash/*` - Already-deleted files
 - `~/Downloads/*.tmp`, `*.part`, `*.crdownload` - Incomplete downloads
@@ -207,7 +211,7 @@ to-do-or-die config show          # View with explanations
 to-do-or-die config set dry_run false
 to-do-or-die config set deletion true
 to-do-or-die config set escalation_cap 15
-to-do-or-die config set permanent_delete true   # Hardcore mode
+to-do-or-die config set permanent_delete true   # Permanently delete instead of using trash
 to-do-or-die config reset
 ```
 
@@ -222,7 +226,7 @@ to-do-or-die config reset
 | `notifications` | true | Desktop notifications |
 | `sound` | true | Audio alerts |
 | `tts` | true | Text-to-speech warnings |
-| `wallpaper` | true | Wallpaper changes |
+| `appearance` | true | Try GNOME/KDE appearance setting; changes are not automatically restored |
 | `deletion` | false | Master switch for file deletion |
 | `tier1` | true | Cache/cookie/trash deletion |
 | `tier2` | true | User-configured directory deletion |
@@ -247,7 +251,7 @@ Following XDG Base Directory specification:
 ```
 User CLI  -->  systemd User Timer  -->  Deadline Checker  -->  Effects Chain
                    (5 min)                (stage calc)          (notify, audio,
-                                                                TTS, wallpaper,
+                                                                TTS, appearance,
                                                                 file deletion)
 ```
 
@@ -260,7 +264,7 @@ User CLI  -->  systemd User Timer  -->  Deadline Checker  -->  Effects Chain
 | `config.rs` | TOML configuration, defaults, atomic save |
 | `todos.rs` | Todo items, JSON persistence, stage calculation |
 | `checker.rs` | Deadline checking, effect triggering, file locking |
-| `effects.rs` | Notifications, audio, TTS, wallpaper |
+| `effects.rs` | Notifications, audio, TTS, desktop appearance effect |
 | `safety.rs` | Candidate gathering, blocklist, path validation |
 | `deleter.rs` | File deletion (trash or permanent), audit logging |
 | `installer.rs` | systemd timer/service unit generation |
@@ -270,7 +274,7 @@ User CLI  -->  systemd User Timer  -->  Deadline Checker  -->  Effects Chain
 
 ```bash
 cargo build              # Build
-cargo test               # Run 43+ unit tests
+cargo test               # Run the unit tests
 cargo clippy --all-targets  # Lint (zero warnings)
 cargo fmt                # Format code
 cargo build --features audio  # Build with native audio
