@@ -252,6 +252,9 @@ mod tests {
         let unit = service_unit();
         assert!(unit.contains("Type=oneshot"));
         assert!(unit.contains("check"));
-        assert!(unit.contains("DISPLAY="));
+        match std::env::var("DISPLAY") {
+            Ok(display) => assert!(unit.contains(&format!("Environment=DISPLAY={display}"))),
+            Err(_) => assert!(!unit.contains("Environment=DISPLAY=")),
+        }
     }
 }
