@@ -45,7 +45,7 @@ fn service_unit() -> String {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "to-do-or-die".to_string());
 
-    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
+    let display = std::env::var("DISPLAY").ok();
     let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
     let xdg_session_type = std::env::var("XDG_SESSION_TYPE").ok();
     let xdg_runtime_dir = std::env::var("XDG_RUNTIME_DIR").ok();
@@ -57,10 +57,12 @@ Description=Todo deadline checker
 [Service]
 Type=oneshot
 ExecStart={binary_path} check
-Environment=DISPLAY={display}
 "#
     );
 
+    if let Some(display) = display {
+        unit.push_str(&format!("Environment=DISPLAY={display}\n"));
+    }
     if let Some(wl) = wayland_display {
         unit.push_str(&format!("Environment=WAYLAND_DISPLAY={wl}\n"));
     }

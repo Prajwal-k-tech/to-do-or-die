@@ -53,6 +53,7 @@ The current version supports built-in candidates and user-configured Tier 2 targ
 
 - Rust toolchain (stable, edition 2024)
 - Linux with systemd (for background monitoring)
+- User units are written to `$XDG_CONFIG_HOME/systemd/user/` (default: `~/.config/systemd/user/`)
 - Optional system packages for full effect chain:
   - `espeak-ng` for text-to-speech
   - `pulseaudio-utils` (paplay) or `alsa-utils` (aplay) for audio alerts
