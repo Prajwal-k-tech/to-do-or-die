@@ -61,21 +61,6 @@ pub fn assets_dir() -> PathBuf {
     data_dir().join("assets")
 }
 
-/// systemd user units directory: ~/.config/systemd/user/
-pub fn systemd_user_dir() -> PathBuf {
-    // systemd follows XDG_CONFIG_HOME for user units. Keep this aligned with
-    // the user's selected config root (and make isolated installs testable).
-    let config_home = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .expect("Could not determine home directory")
-                .join(".config")
-        });
-    config_home.join("systemd").join("user")
-}
-
 /// Ensure all required directories exist
 pub fn ensure_dirs() -> std::io::Result<()> {
     fs::create_dir_all(config_dir())?;

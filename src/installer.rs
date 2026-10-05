@@ -4,10 +4,9 @@
 //! The timer runs `to-do-or-die check` at a configurable interval.
 
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use thiserror::Error;
-
-use crate::paths;
 
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -18,6 +17,36 @@ pub enum InstallerError {
     SystemctlError(String),
     #[error("Failed to enable lingering: {0}")]
     LingerError(String),
+}
+
+/// Resolve the user-unit directory using the systemd user manager's environment.
+/// The installer shell may have a different XDG_CONFIG_HOME from the long-lived
+/// manager, and systemctl activates units from the manager's search path.
+fn systemd_user_dir() -> Result<PathBuf, InstallerError> {
+    let output = Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .map_err(|error| InstallerError::SystemctlError(error.to_string()))?;
+
+    if !output.status.success() {
+        return Err(InstallerError::SystemctlError(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+
+    let manager_config_home = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("XDG_CONFIG_HOME="))
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute());
+
+    let config_home = manager_config_home.unwrap_or_else(|| {
+        dirs::home_dir()
+            .expect("Could not determine home directory")
+            .join(".config")
+    });
+    Ok(config_home.join("systemd").join("user"))
 }
 
 /// systemd timer unit content
@@ -82,7 +111,7 @@ ExecStart={binary_path} check
 
 /// Install systemd user timer and service
 pub fn install(interval_minutes: u32, enable_linger: bool) -> Result<(), InstallerError> {
-    let systemd_dir = paths::systemd_user_dir();
+    let systemd_dir = systemd_user_dir()?;
     fs::create_dir_all(&systemd_dir)?;
 
     // Write timer unit
@@ -124,7 +153,7 @@ pub fn uninstall() -> Result<(), InstallerError> {
     let _ = run_systemctl(&["--user", "disable", "to-do-or-die.timer"]);
     println!("[ok] Stopped and disabled timer");
 
-    let systemd_dir = paths::systemd_user_dir();
+    let systemd_dir = systemd_user_dir()?;
     let timer_path = systemd_dir.join("to-do-or-die.timer");
     let service_path = systemd_dir.join("to-do-or-die.service");
 

@@ -87,7 +87,7 @@ pub enum Commands {
 
     /// Install systemd timer for background monitoring
     #[command(
-        after_help = "This creates systemd user units at $XDG_CONFIG_HOME/systemd/user/\n(default: ~/.config/systemd/user/) and enables a timer to run 'check' at the configured interval."
+        after_help = "This creates systemd user units in the configuration directory used by your systemd user manager (usually ~/.config/systemd/user/) and enables a timer to run 'check' at the configured interval."
     )]
     Install {
         /// Enable lingering so the timer runs even when you are logged out
