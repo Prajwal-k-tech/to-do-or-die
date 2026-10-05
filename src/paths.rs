@@ -61,12 +61,6 @@ pub fn assets_dir() -> PathBuf {
     data_dir().join("assets")
 }
 
-/// systemd user units directory: ~/.config/systemd/user/
-pub fn systemd_user_dir() -> PathBuf {
-    let home = dirs::home_dir().expect("Could not determine home directory");
-    home.join(".config").join("systemd").join("user")
-}
-
 /// Ensure all required directories exist
 pub fn ensure_dirs() -> std::io::Result<()> {
     fs::create_dir_all(config_dir())?;
